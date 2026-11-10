@@ -15,7 +15,7 @@ app.use(express.json());
 app.get("/api", (req, res) => {
   res.json({
     success: true,
-    message: "TuLinkUp Backend API isj running!"
+    message: "TuLinkUp Backend API is running!"
   });
 });
 
