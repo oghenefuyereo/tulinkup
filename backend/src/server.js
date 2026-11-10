@@ -1,11 +1,15 @@
 
 require("dotenv").config();
-const authRoutes = require("./routes/authRoutes");
-app.use("/api/auth", authRoutes);
+
+// Import dependencies
 const express = require("express");
 const cors = require("cors");
 const pool = require("./config/db");
 
+// Import routes
+const authRoutes = require("./routes/authRoutes");
+
+// Initialize Express
 const app = express();
 
 // Middleware
@@ -14,6 +18,9 @@ app.use(cors({
 }));
 
 app.use(express.json());
+
+// Authentication routes
+app.use("/api/auth", authRoutes);
 
 // Home API route
 app.get("/api", (req, res) => {
