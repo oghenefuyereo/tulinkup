@@ -1,25 +1,23 @@
 
 const express = require("express");
 
-const {
-  protect,
-} = require("../middleware/authMiddleware");
+const { protect } = require("../middleware/authMiddleware");
+const bookingRoutes = require("./routes/bookingRoutes");
+
+app.use("/api/bookings", bookingRoutes);
 
 const {
+  getBookings,
   createBooking,
   updateBookingStatus,
-  getBookings,
 } = require("../controllers/bookingController");
 
 const router = express.Router();
 
-// Retrieve bookings for the logged-in student or tutor.
 router.get("/", protect, getBookings);
 
-// Student creates a booking.
 router.post("/", protect, createBooking);
 
-// Update booking status.
 router.patch(
   "/:id/status",
   protect,

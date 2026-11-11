@@ -1,16 +1,9 @@
 
 const pool = require("../config/db");
 
-const allowedDurations = new Set([30, 60, 90]);
+const VALID_DURATIONS = [30, 60, 90];
 
-// Convert HH:MM into minutes.
-function minutes(time) {
-  const [hour, minute] = time.split(":").map(Number);
-  return hour * 60 + minute;
-}
-
-// Validate booking date.
-function validDate(value) {
+function isValidDate(value) {
   if (
     typeof value !== "string" ||
     !/^\d{4}-\d{2}-\d{2}$/.test(value)
@@ -26,159 +19,202 @@ function validDate(value) {
   );
 }
 
-// Validate booking time.
-function validTime(value) {
+function isValidTime(value) {
   return (
     typeof value === "string" &&
-    /^([01]\d|2[0-3]):[0-5]\d$/.test(value)
+    /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/.test(value)
   );
 }
 
-// CREATE BOOKING
+function formatBooking(row) {
+  return {
+    id: String(row.id),
+    studentId: String(row.student_id),
+    tutorId: String(row.tutor_id),
+    date: row.booking_date,
+    startTime: row.booking_time,
+    duration: row.duration_minutes,
+    subject: row.subject_name,
+    studentNote: row.student_note,
+    status: row.status,
+    studentName: row.student_name,
+    tutorName: row.tutor_name,
+    createdAt: row.created_at,
+  };
+}
+
+async function getBookings(req, res) {
+  try {
+    const { userId, role } = req.user;
+
+    if (!["student", "tutor"].includes(role)) {
+      return res.status(403).json({
+        error: "Access denied.",
+      });
+    }
+
+    const column =
+      role === "student"
+        ? "b.student_id"
+        : "b.tutor_id";
+
+    const result = await pool.query(
+      `SELECT
+         b.*,
+         s.full_name AS student_name,
+         t.full_name AS tutor_name
+       FROM public.bookings b
+       JOIN public.users s ON s.id = b.student_id
+       JOIN public.users t ON t.id = b.tutor_id
+       WHERE ${column} = $1
+       ORDER BY b.booking_date DESC, b.booking_time DESC`,
+      [userId]
+    );
+
+    return res.json({
+      success: true,
+      bookings: result.rows.map(formatBooking),
+    });
+  } catch (error) {
+    console.error("Get bookings error:", error);
+
+    return res.status(500).json({
+      error: "Unable to load bookings.",
+    });
+  }
+}
+
 async function createBooking(req, res) {
-  const studentId = req.user?.userId;
-
-  if (req.user?.role !== "student") {
-    return res.status(403).json({
-      error: "Only student accounts can request sessions.",
-    });
-  }
-
-  const {
-    tutorID,
-    subjectID,
-    date,
-    startTime,
-    duration,
-    note,
-  } = req.body || {};
-
-  const tutorProfileId = String(tutorID ?? "").trim();
-  const subject = String(subjectID ?? "").trim();
-  const durationMinutes = Number(duration);
-
-  if (
-    !/^\d+$/.test(tutorProfileId) ||
-    !subject ||
-    !validDate(date) ||
-    !validTime(startTime) ||
-    !allowedDurations.has(durationMinutes)
-  ) {
-    return res.status(400).json({
-      error: "Complete all booking details correctly.",
-    });
-  }
-
-  if (
-    typeof note !== "undefined" &&
-    typeof note !== "string"
-  ) {
-    return res.status(400).json({
-      error: "Invalid booking note.",
-    });
-  }
-
-  const endMinutes = minutes(startTime) + durationMinutes;
-
-  if (endMinutes > 1440) {
-    return res.status(400).json({
-      error: "Session cannot extend beyond midnight.",
-    });
-  }
-
   const client = await pool.connect();
 
   try {
+    if (req.user?.role !== "student") {
+      return res.status(403).json({
+        error: "Only students can request bookings.",
+      });
+    }
+
+    const {
+      tutorID,
+      slotID,
+      subjectID,
+      date,
+      startTime,
+      duration,
+      note = "",
+    } = req.body || {};
+
+    const durationMinutes = Number(duration);
+
+    if (
+      !tutorID ||
+      !slotID ||
+      !subjectID ||
+      !isValidDate(date) ||
+      !isValidTime(startTime) ||
+      !VALID_DURATIONS.includes(durationMinutes) ||
+      typeof note !== "string" ||
+      note.length > 500
+    ) {
+      return res.status(400).json({
+        error: "Invalid booking information.",
+      });
+    }
+
     await client.query("BEGIN");
 
-    // Find tutor profile and verify tutor account.
-    const profileResult = await client.query(
+    const tutorResult = await client.query(
       `SELECT
-         tp.id,
+         tp.id AS profile_id,
          tp.user_id,
          tp.subject
        FROM public.tutor_profiles tp
-       JOIN public.users u
-         ON u.id = tp.user_id
+       JOIN public.users u ON u.id = tp.user_id
        WHERE tp.id = $1
-         AND u.role = 'tutor'`,
-      [tutorProfileId]
+         AND u.role = 'tutor'
+       LIMIT 1`,
+      [tutorID]
     );
 
-    const profile = profileResult.rows[0];
-
-    if (!profile) {
+    if (!tutorResult.rows.length) {
       await client.query("ROLLBACK");
 
       return res.status(404).json({
-        error: "Tutor profile not found.",
+        error: "Tutor not found.",
       });
     }
 
-    if (String(profile.user_id) === String(studentId)) {
+    const tutor = tutorResult.rows[0];
+
+    const tutorSubjects = String(tutor.subject || "")
+      .split(",")
+      .map((subject) => subject.trim())
+      .filter(Boolean);
+
+    if (!tutorSubjects.includes(String(subjectID))) {
       await client.query("ROLLBACK");
 
       return res.status(400).json({
-        error: "You cannot book yourself.",
+        error: "This tutor does not offer that subject.",
       });
     }
 
-    // Validate the subject.
-    if (
-      !profile.subject ||
-      profile.subject.trim().toLowerCase() !==
-        subject.toLowerCase()
-    ) {
-      await client.query("ROLLBACK");
-
-      return res.status(400).json({
-        error: "The tutor does not offer this subject.",
-      });
-    }
-
-    // Prevent concurrent requests for this tutor and date.
-    await client.query(
-      `SELECT pg_advisory_xact_lock(
-         hashtext($1),
-         hashtext($2)
-       )`,
-      [String(profile.user_id), date]
-    );
-
-    // Validate that the tutor has published this time.
-    const availabilityResult = await client.query(
-      `SELECT id
+    const slotResult = await client.query(
+      `SELECT
+         id,
+         available_date,
+         start_time,
+         end_time
        FROM public.tutor_availability
-       WHERE tutor_id = $1
-         AND available_date = $2::date
-         AND start_time <= $3::time
-         AND end_time >= (
-           $3::time +
-           ($4::integer * INTERVAL '1 minute')
-         )
-       LIMIT 1`,
+       WHERE id = $1
+         AND tutor_id = $2
+         AND is_available = TRUE
+         AND available_date = $3
+         AND start_time = $4
+       FOR UPDATE`,
       [
-        profile.user_id,
+        slotID,
+        tutor.user_id,
         date,
         startTime,
-        durationMinutes,
       ]
     );
 
-    if (!availabilityResult.rows.length) {
+    if (!slotResult.rows.length) {
       await client.query("ROLLBACK");
 
       return res.status(409).json({
-        error: "This time is not available.",
+        error: "This time slot is no longer available.",
       });
     }
 
-    // Check for overlapping bookings.
-    const conflictResult = await client.query(
+    const slot = slotResult.rows[0];
+
+    const toMinutes = (value) => {
+      const [hours, minutes] = String(value)
+        .split(":")
+        .map(Number);
+
+      return hours * 60 + minutes;
+    };
+
+    const startMinutes = toMinutes(slot.start_time);
+    const endMinutes = toMinutes(slot.end_time);
+
+    if (startMinutes + durationMinutes > endMinutes) {
+      await client.query("ROLLBACK");
+
+      return res.status(400).json({
+        error:
+          "The selected slot is too short for this duration.",
+      });
+    }
+
+    const conflict = await client.query(
       `SELECT id
        FROM public.bookings
        WHERE tutor_id = $1
-         AND booking_date = $2::date
+         AND booking_date = $2
          AND status IN ('pending', 'accepted')
          AND booking_time < (
            $3::time +
@@ -190,67 +226,44 @@ async function createBooking(req, res) {
          ) > $3::time
        LIMIT 1`,
       [
-        profile.user_id,
+        tutor.user_id,
         date,
         startTime,
         durationMinutes,
       ]
     );
 
-    if (conflictResult.rows.length) {
+    if (conflict.rows.length) {
       await client.query("ROLLBACK");
 
       return res.status(409).json({
         error:
-          "That time has just been booked. Please choose another.",
+          "This tutor already has a booking at that time.",
       });
     }
 
-    // Reject sessions whose start time has passed.
-    // This assumes booking dates/times use UTC.
-    const nowResult = await client.query(
-      `SELECT (
-         $1::date + $2::time
-       ) > (NOW() AT TIME ZONE 'UTC') AS is_future`,
-      [date, startTime]
-    );
-
-    if (!nowResult.rows[0].is_future) {
-      await client.query("ROLLBACK");
-
-      return res.status(400).json({
-        error: "Cannot book a session in the past.",
-      });
-    }
-
-    // Save the booking.
-    const bookingResult = await client.query(
-      `INSERT INTO public.bookings (
-         student_id,
-         tutor_id,
-         booking_date,
-         booking_time,
-         duration_minutes,
-         student_note,
-         status
-       )
-       VALUES (
-         $1,
-         $2,
-         $3::date,
-         $4::time,
-         $5,
-         $6,
-         'pending'
-       )
-       RETURNING id, status`,
+    const result = await client.query(
+      `INSERT INTO public.bookings
+        (
+          student_id,
+          tutor_id,
+          booking_date,
+          booking_time,
+          duration_minutes,
+          subject_name,
+          student_note,
+          status
+        )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')
+       RETURNING *`,
       [
-        studentId,
-        profile.user_id,
+        req.user.userId,
+        tutor.user_id,
         date,
         startTime,
         durationMinutes,
-        (note || "").trim().slice(0, 500),
+        String(subjectID),
+        note.trim(),
       ]
     );
 
@@ -258,14 +271,13 @@ async function createBooking(req, res) {
 
     return res.status(201).json({
       success: true,
-      id: bookingResult.rows[0].id,
-      status: bookingResult.rows[0].status,
-      message: "Booking request submitted successfully.",
+      message: "Booking request submitted.",
+      booking: result.rows[0],
     });
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
+    await client.query("ROLLBACK");
 
-    console.error("Booking creation error:", error);
+    console.error("Create booking error:", error);
 
     return res.status(500).json({
       error: "Unable to create booking.",
@@ -275,53 +287,37 @@ async function createBooking(req, res) {
   }
 }
 
-// UPDATE BOOKING STATUS
 async function updateBookingStatus(req, res) {
-  const bookingId = String(req.params.id ?? "").trim();
-  const newStatus = req.body?.status;
-  const userId = req.user?.userId;
-  const role = req.user?.role;
-
-  const allowedStatuses = [
-    "accepted",
-    "declined",
-    "completed",
-    "cancelled",
-  ];
-
-  if (
-    !/^\d+$/.test(bookingId) ||
-    !allowedStatuses.includes(newStatus)
-  ) {
-    return res.status(400).json({
-      error: "Invalid booking update.",
-    });
-  }
-
   const client = await pool.connect();
 
   try {
+    const { userId, role } = req.user;
+    const { status } = req.body || {};
+
+    if (
+      ![
+        "accepted",
+        "declined",
+        "cancelled",
+        "completed",
+      ].includes(status)
+    ) {
+      return res.status(400).json({
+        error: "Invalid booking status.",
+      });
+    }
+
     await client.query("BEGIN");
 
-    // Lock booking record during update.
     const result = await client.query(
-      `SELECT
-         id,
-         student_id,
-         tutor_id,
-         booking_date,
-         booking_time,
-         duration_minutes,
-         status
+      `SELECT *
        FROM public.bookings
        WHERE id = $1
        FOR UPDATE`,
-      [bookingId]
+      [req.params.id]
     );
 
-    const booking = result.rows[0];
-
-    if (!booking) {
+    if (!result.rows.length) {
       await client.query("ROLLBACK");
 
       return res.status(404).json({
@@ -329,7 +325,8 @@ async function updateBookingStatus(req, res) {
       });
     }
 
-    // Verify booking ownership.
+    const booking = result.rows[0];
+
     const isStudent =
       role === "student" &&
       String(booking.student_id) === String(userId);
@@ -342,92 +339,54 @@ async function updateBookingStatus(req, res) {
       await client.query("ROLLBACK");
 
       return res.status(403).json({
-        error: "You cannot manage this booking.",
+        error: "You cannot update this booking.",
       });
     }
 
-    // Define valid status transitions.
-    const transitions = {
-      pending: {
-        student: ["cancelled"],
-        tutor: ["accepted", "declined"],
-      },
-      accepted: {
-        student: ["cancelled"],
-        tutor: ["completed", "cancelled"],
-      },
-      declined: {
-        student: [],
-        tutor: [],
-      },
-      cancelled: {
-        student: [],
-        tutor: [],
-      },
-      completed: {
-        student: [],
-        tutor: [],
-      },
-    };
+    let allowed = false;
 
-    const permittedStatuses =
-      transitions[booking.status]?.[role] ?? [];
+    if (isStudent) {
+      allowed =
+        ["pending", "accepted"].includes(
+          booking.status
+        ) && status === "cancelled";
+    }
 
-    if (!permittedStatuses.includes(newStatus)) {
+    if (isTutor) {
+      allowed =
+        (booking.status === "pending" &&
+          ["accepted", "declined"].includes(status)) ||
+        (booking.status === "accepted" &&
+          status === "completed");
+    }
+
+    if (!allowed) {
       await client.query("ROLLBACK");
 
-      return res.status(409).json({
-        error:
-          `Cannot change a ${booking.status} booking to ${newStatus}.`,
+      return res.status(400).json({
+        error: "That status change is not allowed.",
       });
     }
 
-    // Mark completed only after the session has ended.
-    // This assumes booking dates/times use UTC.
-    if (newStatus === "completed") {
-      const endResult = await client.query(
-        `SELECT (
-           $1::date +
-           $2::time +
-           ($3::integer * INTERVAL '1 minute')
-         ) <= (NOW() AT TIME ZONE 'UTC') AS has_ended`,
-        [
-          booking.booking_date,
-          booking.booking_time,
-          booking.duration_minutes,
-        ]
-      );
-
-      if (!endResult.rows[0].has_ended) {
-        await client.query("ROLLBACK");
-
-        return res.status(409).json({
-          error:
-            "A session can only be completed after it ends.",
-        });
-      }
-    }
-
-    // Update status.
     const updated = await client.query(
       `UPDATE public.bookings
        SET status = $1
        WHERE id = $2
-       RETURNING id, status`,
-      [newStatus, bookingId]
+       RETURNING *`,
+      [status, booking.id]
     );
 
     await client.query("COMMIT");
 
-    return res.status(200).json({
+    return res.json({
       success: true,
-      message: "Booking status updated successfully.",
-      booking: updated.rows[0],
+      message: "Booking updated successfully.",
+      booking: formatBooking(updated.rows[0]),
     });
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
+    await client.query("ROLLBACK");
 
-    console.error("Booking status update error:", error);
+    console.error("Update booking error:", error);
 
     return res.status(500).json({
       error: "Unable to update booking.",
@@ -437,62 +396,8 @@ async function updateBookingStatus(req, res) {
   }
 }
 
-async function getBookings(req, res) {
-  const userId = req.user?.userId;
-  const role = req.user?.role;
-
-  if (!userId || !["student", "tutor"].includes(role)) {
-    return res.status(403).json({
-      error: "Access denied.",
-    });
-  }
-
-  try {
-    const isStudent = role === "student";
-
-    const result = await pool.query(
-      `SELECT
-         b.id,
-         b.booking_date AS date,
-         b.booking_time AS "startTime",
-         b.duration_minutes AS duration,
-         b.student_note AS note,
-         b.status,
-         b.created_at,
-         s.full_name AS "studentName",
-         t.full_name AS "tutorName",
-         tp.subject AS "subjectName"
-       FROM public.bookings b
-       JOIN public.users s
-         ON s.id = b.student_id
-       JOIN public.users t
-         ON t.id = b.tutor_id
-       LEFT JOIN public.tutor_profiles tp
-         ON tp.user_id = b.tutor_id
-       WHERE ${
-         isStudent
-           ? "b.student_id = $1"
-           : "b.tutor_id = $1"
-       }
-       ORDER BY b.booking_date DESC, b.booking_time DESC`,
-      [userId]
-    );
-
-    return res.json({
-      success: true,
-      bookings: result.rows,
-    });
-  } catch (error) {
-    console.error("Fetch bookings error:", error);
-
-    return res.status(500).json({
-      error: "Unable to load bookings.",
-    });
-  }
-}
-
 module.exports = {
+  getBookings,
   createBooking,
   updateBookingStatus,
-  getBookings,
 };
