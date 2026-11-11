@@ -2,13 +2,18 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 
+export const dynamic = "force-dynamic";
+
 const API_URL =
   process.env.API_URL || "http://localhost:5001";
 
 const allowedDurations = new Set(["30", "60", "90"]);
 
 function validDate(value) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+  if (
+    typeof value !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(value)
+  ) {
     return false;
   }
 
@@ -21,10 +26,20 @@ function validDate(value) {
 }
 
 function validTime(value) {
-  return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+  return (
+    typeof value === "string" &&
+    /^([01]\d|2[0-3]):[0-5]\d$/.test(value)
+  );
 }
 
 async function readJSON(response) {
+  const contentType =
+    response.headers.get("content-type") || "";
+
+  if (!contentType.includes("application/json")) {
+    return null;
+  }
+
   try {
     return await response.json();
   } catch {
@@ -34,7 +49,7 @@ async function readJSON(response) {
 
 export async function POST(request) {
   try {
-    // Retrieve authentication token.
+    // 1. Retrieve authentication token.
     const cookieStore = await cookies();
     const token = cookieStore.get("tulinkup_token")?.value;
 
@@ -45,7 +60,7 @@ export async function POST(request) {
       );
     }
 
-    // Verify authentication through Express.
+    // 2. Verify authentication through Express.
     const authResponse = await fetch(
       `${API_URL}/api/auth/me`,
       {
@@ -61,20 +76,21 @@ export async function POST(request) {
     if (authResponse.status === 401) {
       return NextResponse.json(
         {
-          error: "Your session has expired. Please log in again.",
+          error:
+            "Your session has expired. Please log in again.",
         },
         { status: 401 }
       );
     }
 
-    if (!authResponse.ok) {
+    if (!authResponse.ok || !authData) {
       return NextResponse.json(
         { error: "Unable to verify your account." },
         { status: 502 }
       );
     }
 
-    const user = authData?.user;
+    const user = authData.user;
 
     if (!user) {
       return NextResponse.json(
@@ -86,13 +102,14 @@ export async function POST(request) {
     if (user.role !== "student") {
       return NextResponse.json(
         {
-          error: "Only student accounts can request sessions.",
+          error:
+            "Only student accounts can request sessions.",
         },
         { status: 403 }
       );
     }
 
-    // Read booking form data.
+    // 3. Read booking form data.
     let body;
 
     try {
@@ -104,20 +121,39 @@ export async function POST(request) {
       );
     }
 
-    const tutorID = String(body?.tutorID ?? "").trim();
-    const subjectID = String(body?.subjectID ?? "").trim();
-    const date = String(body?.date ?? "").trim();
-    const startTime = String(body?.startTime ?? "").trim();
-    const duration = String(body?.duration ?? "").trim();
+    const tutorID = String(
+      body?.tutorID ?? ""
+    ).trim();
+
+    const slotID = String(
+      body?.slotID ?? ""
+    ).trim();
+
+    const subjectID = String(
+      body?.subjectID ?? ""
+    ).trim();
+
+    const date = String(
+      body?.date ?? ""
+    ).trim();
+
+    const startTime = String(
+      body?.startTime ?? ""
+    ).trim();
+
+    const duration = String(
+      body?.duration ?? ""
+    ).trim();
 
     const note =
       typeof body?.note === "string"
         ? body.note.trim().slice(0, 500)
         : "";
 
-    // Validate booking details.
+    // 4. Validate booking details.
     if (
       !/^\d+$/.test(tutorID) ||
+      !/^\d+$/.test(slotID) ||
       !subjectID ||
       !validDate(date) ||
       !validTime(startTime) ||
@@ -125,13 +161,14 @@ export async function POST(request) {
     ) {
       return NextResponse.json(
         {
-          error: "Please complete all booking details correctly.",
+          error:
+            "Please complete all booking details correctly.",
         },
         { status: 400 }
       );
     }
 
-    // Forward request to Express backend.
+    // 5. Forward validated request to Express.
     const response = await fetch(
       `${API_URL}/api/bookings`,
       {
@@ -142,6 +179,7 @@ export async function POST(request) {
         },
         body: JSON.stringify({
           tutorID,
+          slotID,
           subjectID,
           date,
           startTime,
@@ -154,6 +192,7 @@ export async function POST(request) {
 
     const data = await readJSON(response);
 
+    // 6. Handle backend errors.
     if (!response.ok) {
       return NextResponse.json(
         {
@@ -166,13 +205,20 @@ export async function POST(request) {
       );
     }
 
-    return NextResponse.json(
-      data ?? {
-        success: true,
-        message: "Booking request submitted.",
-      },
-      { status: response.status }
-    );
+    if (!data) {
+      return NextResponse.json(
+        {
+          error:
+            "Booking service returned an invalid response.",
+        },
+        { status: 502 }
+      );
+    }
+
+    // 7. Return successful booking.
+    return NextResponse.json(data, {
+      status: response.status,
+    });
   } catch (error) {
     console.error("Booking API error:", error);
 
@@ -185,4 +231,3 @@ export async function POST(request) {
     );
   }
 }
-
