@@ -5,30 +5,34 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const pool = require("./config/db");
-const bookingRoutes = require("./routes/bookingRoutes");
-app.use("/api/bookings", bookingRoutes);
 
 // Import routes
 const authRoutes = require("./routes/authRoutes");
+const bookingRoutes = require("./routes/bookingRoutes");
 
 // Initialize Express
 const app = express();
 
 // Middleware
-app.use(cors({
-  origin: "http://localhost:3000"
-}));
+app.use(
+  cors({
+    origin: "http://localhost:3000",
+  })
+);
 
 app.use(express.json());
 
 // Authentication routes
 app.use("/api/auth", authRoutes);
 
+// Booking routes
+app.use("/api/bookings", bookingRoutes);
+
 // Home API route
 app.get("/api", (req, res) => {
   res.json({
     success: true,
-    message: "TuLinkUp Backend API is running!"
+    message: "TuLinkUp Backend API is running!",
   });
 });
 
@@ -42,15 +46,17 @@ app.get("/api/db-test", async (req, res) => {
     res.json({
       success: true,
       message: "TuLinkUp connected to Supabase!",
-      database_time: result.rows[0].current_time
+      database_time: result.rows[0].current_time,
     });
-
   } catch (error) {
-    console.error("Database connection error:", error.message);
+    console.error(
+      "Database connection error:",
+      error.message
+    );
 
     res.status(500).json({
       success: false,
-      message: "Database connection failed"
+      message: "Database connection failed",
     });
   }
 });
@@ -60,7 +66,9 @@ const PORT = process.env.PORT || 5001;
 
 // Start Express server
 const server = app.listen(PORT, () => {
-  console.log(`TuLinkUp API listening on port ${PORT}`);
+  console.log(
+    `TuLinkUp API listening on port ${PORT}`
+  );
 });
 
 // Handle server errors
