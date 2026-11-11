@@ -1,5 +1,6 @@
 
 import "./globals.css";
+import { Header } from "@/components/Header";
 
 const siteUrl =
   process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
@@ -38,6 +39,7 @@ export default function RootLayout({ children }) {
     <html lang="en">
       <body className="min-h-screen bg-white text-[#17233d] antialiased">
         <div id="root">
+          <Header />
           {children}
         </div>
       </body>

@@ -5,6 +5,8 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const pool = require("./config/db");
+const bookingRoutes = require("./routes/bookingRoutes");
+app.use("/api/bookings", bookingRoutes);
 
 // Import routes
 const authRoutes = require("./routes/authRoutes");
