@@ -1,4 +1,5 @@
 const tutorRoutes = require("./routes/tutorRoutes");
+const profileRoutes = require("./routes/profileRoutes");
 require("dotenv").config();
 
 // Import dependencies
@@ -21,6 +22,7 @@ app.use(
 );
 
 app.use(express.json());
+app.use("/api/profile", profileRoutes);
 
 // Authentication routes
 app.use("/api/auth", authRoutes);
