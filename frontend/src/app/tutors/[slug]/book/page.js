@@ -1,7 +1,6 @@
 
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { cookies } from "next/headers";
 
 import { BookingForm } from "@/components/BookingForm";
 import { MobileNav } from "@/components/MobileNav";
@@ -13,9 +12,6 @@ const API_URL =
 
 export default async function BookingPage({ params }) {
   const { slug } = await params;
-
-  const cookieStore = await cookies();
-  const token = cookieStore.get("tulinkup_token")?.value;
 
   const tutorResponse = await fetch(
     `${API_URL}/api/tutors/${encodeURIComponent(slug)}`,
@@ -29,7 +25,9 @@ export default async function BookingPage({ params }) {
   }
 
   if (!tutorResponse.ok) {
-    throw new Error("Unable to load tutor profile.");
+    throw new Error(
+      `Unable to load tutor profile (HTTP ${tutorResponse.status}).`
+    );
   }
 
   const tutorData = await tutorResponse.json();
@@ -39,26 +37,56 @@ export default async function BookingPage({ params }) {
     notFound();
   }
 
+  // Availability is associated with the tutor's user ID.
+  const tutorId = tutor.user_id ?? tutor.userId;
+
+  if (!tutorId) {
+    throw new Error(
+      "Tutor user ID is missing from the tutor API response."
+    );
+  }
+
   const availabilityResponse = await fetch(
-    `${API_URL}/api/tutors/${encodeURIComponent(slug)}/availability`,
+    `${API_URL}/api/availability/tutor/${encodeURIComponent(tutorId)}`,
     {
       cache: "no-store",
     }
   );
 
   if (!availabilityResponse.ok) {
-    throw new Error("Unable to load tutor availability.");
+    const errorBody = await availabilityResponse.text();
+
+    console.error("Tutor availability API error:", {
+      status: availabilityResponse.status,
+      response: errorBody,
+    });
+
+    throw new Error(
+      `Unable to load tutor availability (HTTP ${availabilityResponse.status}).`
+    );
   }
 
   const availabilityData = await availabilityResponse.json();
-  const slots = availabilityData.slots ?? [];
+
+  const slots = Array.isArray(availabilityData.slots)
+    ? availabilityData.slots
+    : Array.isArray(availabilityData.availability)
+      ? availabilityData.availability
+      : [];
+
+  const tutorName =
+    tutor.name ??
+    tutor.display_name ??
+    tutor.displayName ??
+    tutor.full_name ??
+    "your tutor";
 
   return (
     <>
       <main className="min-h-screen bg-[#f7f9fd] py-8 sm:py-12">
         <div className="page-wrap">
           <Link
-            href={`/tutors/${slug}`}
+            href={`/tutors/${encodeURIComponent(slug)}`}
             className="text-sm font-bold text-[#52617b]"
           >
             ← Back to profile
@@ -69,7 +97,7 @@ export default async function BookingPage({ params }) {
           </p>
 
           <h1 className="mt-3 text-3xl font-extrabold tracking-[-.04em] sm:text-4xl">
-            Choose a time with {tutor.name}
+            Choose a time with {tutorName}
           </h1>
 
           <p className="mt-3 text-[#68758c]">

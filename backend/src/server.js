@@ -12,6 +12,11 @@ const profileRoutes = require("./routes/profileRoutes");
 const bookingRoutes = require("./routes/bookingRoutes");
 const availabilityRoutes = require("./routes/availabilityRoutes");
 const mediaRoutes = require("./routes/mediaRoutes");
+const reviewRoutes = require("./routes/reviewRoutes");
+const subjectRoutes = require("./routes/subjectRoutes");
+const tagRoutes = require("./routes/tagRoutes");
+const tutorProfileRoutes = require("./routes/tutorProfileRoutes");
+const userRoutes = require("./routes/userRoutes");
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -59,6 +64,11 @@ app.use("/api/profile", profileRoutes);
 app.use("/api/bookings", bookingRoutes);
 app.use("/api/availability", availabilityRoutes);
 app.use("/api/media", mediaRoutes);
+app.use("/api/reviews", reviewRoutes);
+app.use("/api/subjects", subjectRoutes);
+app.use("/api/tags", tagRoutes);
+app.use("/api/tutor-profiles", tutorProfileRoutes);
+app.use("/api/users", userRoutes);
 
 app.use((req, res) => {
   res.status(404).json({
