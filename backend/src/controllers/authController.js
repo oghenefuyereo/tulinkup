@@ -170,5 +170,34 @@ const login = async (req, res) => {
 };
 
 
+const getMe = async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, full_name, email, role
+       FROM public.users
+       WHERE id = $1`,
+      [req.user.userId]
+    );
 
-module.exports = { register, login };
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    return res.json({
+      success: true,
+      user: result.rows[0],
+    });
+  } catch (error) {
+    console.error("Get current user error:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to retrieve user",
+    });
+  }
+};
+
+module.exports = { register, login, getMe };

@@ -3,15 +3,19 @@ const express = require("express");
 
 const {
   register,
-  login
+  login,
+  getMe,
 } = require("../controllers/authController");
+
+const { protect } = require("../middleware/authMiddleware");
 
 const router = express.Router();
 
-// Register new student or tutor
+// Public authentication routes
 router.post("/register", register);
-
-// Login existing student or tutor
 router.post("/login", login);
+
+// Protected current-user route
+router.get("/me", protect, getMe);
 
 module.exports = router;
