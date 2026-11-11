@@ -1,4 +1,4 @@
-
+const tutorRoutes = require("./routes/tutorRoutes");
 require("dotenv").config();
 
 // Import dependencies
@@ -24,6 +24,7 @@ app.use(express.json());
 
 // Authentication routes
 app.use("/api/auth", authRoutes);
+app.use("/api/tutors", tutorRoutes);
 
 // Booking routes
 app.use("/api/bookings", bookingRoutes);
