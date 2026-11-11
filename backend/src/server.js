@@ -1,37 +1,30 @@
-const tutorRoutes = require("./routes/tutorRoutes");
-const profileRoutes = require("./routes/profileRoutes");
+
 require("dotenv").config();
 
-// Import dependencies
 const express = require("express");
 const cors = require("cors");
+
 const pool = require("./config/db");
 
-// Import routes
 const authRoutes = require("./routes/authRoutes");
+const tutorRoutes = require("./routes/tutorRoutes");
+const profileRoutes = require("./routes/profileRoutes");
 const bookingRoutes = require("./routes/bookingRoutes");
+const availabilityRoutes = require("./routes/availabilityRoutes");
+const mediaRoutes = require("./routes/mediaRoutes");
 
-// Initialize Express
 const app = express();
+const PORT = process.env.PORT || 5001;
 
-// Middleware
 app.use(
   cors({
-    origin: "http://localhost:3000",
+    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    credentials: true,
   })
 );
 
 app.use(express.json());
-app.use("/api/profile", profileRoutes);
 
-// Authentication routes
-app.use("/api/auth", authRoutes);
-app.use("/api/tutors", tutorRoutes);
-
-// Booking routes
-app.use("/api/bookings", bookingRoutes);
-
-// Home API route
 app.get("/api", (req, res) => {
   res.json({
     success: true,
@@ -39,7 +32,6 @@ app.get("/api", (req, res) => {
   });
 });
 
-// Test Supabase PostgreSQL connection
 app.get("/api/db-test", async (req, res) => {
   try {
     const result = await pool.query(
@@ -52,10 +44,7 @@ app.get("/api/db-test", async (req, res) => {
       database_time: result.rows[0].current_time,
     });
   } catch (error) {
-    console.error(
-      "Database connection error:",
-      error.message
-    );
+    console.error("Database connection error:", error.message);
 
     res.status(500).json({
       success: false,
@@ -64,22 +53,51 @@ app.get("/api/db-test", async (req, res) => {
   }
 });
 
-// Server configuration
-const PORT = process.env.PORT || 5001;
+app.use("/api/auth", authRoutes);
+app.use("/api/tutors", tutorRoutes);
+app.use("/api/profile", profileRoutes);
+app.use("/api/bookings", bookingRoutes);
+app.use("/api/availability", availabilityRoutes);
+app.use("/api/media", mediaRoutes);
 
-// Start Express server
-const server = app.listen(PORT, () => {
-  console.log(
-    `TuLinkUp API listening on port ${PORT}`
-  );
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: "API endpoint not found",
+  });
 });
 
-// Handle server errors
+app.use((error, req, res, next) => {
+  console.error("API error:", error);
+
+  if (error.code === "LIMIT_FILE_SIZE") {
+    return res.status(413).json({
+      success: false,
+      message: "Uploaded file is too large.",
+    });
+  }
+
+  if (error.name === "MulterError") {
+    return res.status(400).json({
+      success: false,
+      message: "Invalid file upload.",
+    });
+  }
+
+  res.status(500).json({
+    success: false,
+    message: "Internal server error",
+  });
+});
+
+const server = app.listen(PORT, () => {
+  console.log(`TuLinkUp API listening on port ${PORT}`);
+});
+
 server.on("error", (error) => {
   console.error("Server error:", error.message);
 });
 
-// Handle server shutdown
 server.on("close", () => {
   console.log("TuLinkUp server was closed");
 });
