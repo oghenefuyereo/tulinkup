@@ -14,21 +14,29 @@ My purpose for developing TuLinkUp is to deepen my understanding of JavaScript, 
 
 I developed TuLinkUp using Visual Studio Code on macOS, with Git and GitHub for version control and source code management.
 
-The application is built using JavaScript (ES6+) as the primary programming language. I used Node.js and Express.js for backend development, Next.js and React for the frontend, and Tailwind CSS for responsive styling. npm was used to install and manage project dependencies.
+The application is built using JavaScript (ES6+) as the primary programming language. I used Node.js and Express.js for backend development, Next.js and React for the frontend, and Tailwind CSS for responsive styling. Supabase provides a cloud-hosted PostgreSQL database for managing application data, while npm is used to install and manage project dependencies.
 
-This development environment allowed me to practice JavaScript programming, build interactive features, and gain experience developing a full-stack web application.
+This development environment allows me to practice JavaScript programming, database integration, and full-stack web application development.
 
 # Useful Websites
 
-{Make a list of websites that you found helpful in this project}
+- [MDN Web Docs – JavaScript](https://developer.mozilla.org/en-US/docs/Web/JavaScript)
+- [JavaScript.info](https://javascript.info/)
+- [W3Schools – JavaScript Tutorial](https://www.w3schools.com/js/)
+- [Node.js Documentation](https://nodejs.org/en/docs)
+- [Next.js Documentation](https://nextjs.org/docs)
+- [React Documentation](https://react.dev/)
+- [Express.js Documentation](https://expressjs.com/)
+- [Supabase Documentation](https://supabase.com/docs)
+- [YouTube – JavaScript Tutorials](https://www.youtube.com/results?search_query=javascript+tutorial)
 
-- [Web Site Name](http://url.link.goes.here)
-- [Web Site Name](http://url.link.goes.here)
 
 # Future Work
 
-{Make a list of things that you need to fix, improve, and add in the future.}
-
-- Item 1
-- Item 2
-- Item 3
+- Complete student and tutor registration and authentication.
+- Implement tutor search, filtering, and profile management.
+- Integrate Supabase PostgreSQL for secure data storage.
+- Develop interactive student and tutor dashboards.
+- Add tutor availability and session booking functionality.
+- Improve application security, performance, and user experience.
+- Test and deploy the application for public use.
