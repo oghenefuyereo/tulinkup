@@ -12,9 +12,11 @@ My purpose for developing TuLinkUp is to deepen my understanding of JavaScript, 
 
 # Development Environment
 
-{Describe the tools that you used to develop the software}
+I developed TuLinkUp using Visual Studio Code on macOS, with Git and GitHub for version control and source code management.
 
-{Describe the programming language that you used and any libraries.}
+The application is built using JavaScript (ES6+) as the primary programming language. I used Node.js and Express.js for backend development, Next.js and React for the frontend, and Tailwind CSS for responsive styling. npm was used to install and manage project dependencies.
+
+This development environment allowed me to practice JavaScript programming, build interactive features, and gain experience developing a full-stack web application.
 
 # Useful Websites
 
