@@ -68,7 +68,8 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     // Set English as the website's main language.
-    <html lang="en">
+    // Suppress hydration warnings on the root HTML element.
+    <html lang="en" suppressHydrationWarning>
       <body className="min-h-screen bg-white text-[#17233d] antialiased">
         {/* Allow keyboard users to skip directly to the main content. */}
         <a
