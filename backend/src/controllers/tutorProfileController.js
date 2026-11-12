@@ -1,8 +1,11 @@
 
+// Import the database connection to manage tutor profiles.
 const pool = require("../config/db");
 
+// Get all tutor profiles, including the subjects they teach.
 const getTutorProfiles = async (req, res) => {
   try {
+    // Get tutor details and combine each tutor's subjects into a list.
     const result = await pool.query(`
       SELECT
         tp.id,
@@ -39,11 +42,13 @@ const getTutorProfiles = async (req, res) => {
       ORDER BY tp.featured DESC, tp.rating DESC, tp.id DESC
     `);
 
+    // Send the tutor profiles back to the frontend.
     res.json({
       success: true,
       tutors: result.rows,
     });
   } catch (error) {
+    // Log any errors that happen while loading tutor profiles.
     console.error("Get tutor profiles error:", error.message);
     res.status(500).json({
       success: false,
@@ -52,8 +57,10 @@ const getTutorProfiles = async (req, res) => {
   }
 };
 
+// Get a specific tutor profile using its unique URL slug.
 const getTutorProfileBySlug = async (req, res) => {
   try {
+    // Search for the tutor profile using the slug from the URL.
     const result = await pool.query(
       `SELECT *
        FROM public.tutor_profiles
@@ -61,6 +68,7 @@ const getTutorProfileBySlug = async (req, res) => {
       [req.params.slug]
     );
 
+    // Return an error if the tutor profile does not exist.
     if (!result.rows.length) {
       return res.status(404).json({
         success: false,
@@ -68,11 +76,13 @@ const getTutorProfileBySlug = async (req, res) => {
       });
     }
 
+    // Send the tutor's profile information to the frontend.
     res.json({
       success: true,
       tutor: result.rows[0],
     });
   } catch (error) {
+    // Log any errors that happen while retrieving the tutor profile.
     console.error("Get tutor profile error:", error.message);
     res.status(500).json({
       success: false,
@@ -81,10 +91,13 @@ const getTutorProfileBySlug = async (req, res) => {
   }
 };
 
+// Allow a tutor to create a profile with their professional details.
 const createTutorProfile = async (req, res) => {
+  // Get a database connection to save the profile and its subjects.
   const client = await pool.connect();
 
   try {
+    // Only registered tutors can create tutor profiles.
     if (req.user.role !== "tutor") {
       return res.status(403).json({
         success: false,
@@ -92,6 +105,7 @@ const createTutorProfile = async (req, res) => {
       });
     }
 
+    // Get the tutor's information from the submitted form.
     const {
       displayName,
       slug,
@@ -104,6 +118,8 @@ const createTutorProfile = async (req, res) => {
       subjectIds,
     } = req.body;
 
+    // Make sure all required fields are completed correctly.
+    // Tutors must also choose at least one subject and a valid hourly rate.
     if (
       !displayName?.trim() ||
       !slug?.trim() ||
@@ -124,8 +140,10 @@ const createTutorProfile = async (req, res) => {
       });
     }
 
+    // Start a transaction so the profile and subjects are saved together.
     await client.query("BEGIN");
 
+    // Save the tutor's main profile information in the database.
     const result = await client.query(
       `INSERT INTO public.tutor_profiles (
         user_id,
@@ -153,8 +171,10 @@ const createTutorProfile = async (req, res) => {
       ]
     );
 
+    // Get the newly created tutor profile.
     const tutor = result.rows[0];
 
+    // Save each selected subject without adding duplicates.
     for (const subjectId of [...new Set(subjectIds)]) {
       await client.query(
         `INSERT INTO public.tutor_subjects
@@ -164,16 +184,20 @@ const createTutorProfile = async (req, res) => {
       );
     }
 
+    // Save the transaction once the profile and subjects are added.
     await client.query("COMMIT");
 
+    // Confirm that the tutor profile was created successfully.
     res.status(201).json({
       success: true,
       tutor,
     });
   } catch (error) {
+    // Undo the changes if something goes wrong.
     await client.query("ROLLBACK");
     console.error("Create tutor profile error:", error.message);
 
+    // Return a specific message if the profile or slug already exists.
     res.status(error.code === "23505" ? 409 : 500).json({
       success: false,
       message:
@@ -182,12 +206,15 @@ const createTutorProfile = async (req, res) => {
           : "Unable to create tutor profile",
     });
   } finally {
+    // Release the database connection after the request is finished.
     client.release();
   }
 };
 
+// Allow tutors to update their existing profile information.
 const updateTutorProfile = async (req, res) => {
   try {
+    // Only tutors are allowed to update tutor profiles.
     if (req.user.role !== "tutor") {
       return res.status(403).json({
         success: false,
@@ -195,6 +222,7 @@ const updateTutorProfile = async (req, res) => {
       });
     }
 
+    // Get the updated profile details from the request.
     const {
       displayName,
       title,
@@ -206,6 +234,8 @@ const updateTutorProfile = async (req, res) => {
       availabilityStatus,
     } = req.body;
 
+    // Update only the fields that have been provided.
+    // Keep the existing values for fields that are not being changed.
     const result = await pool.query(
       `UPDATE public.tutor_profiles
        SET display_name = COALESCE($1, display_name),
@@ -232,6 +262,7 @@ const updateTutorProfile = async (req, res) => {
       ]
     );
 
+    // Return an error if the profile does not exist or belongs to another tutor.
     if (!result.rows.length) {
       return res.status(404).json({
         success: false,
@@ -239,11 +270,13 @@ const updateTutorProfile = async (req, res) => {
       });
     }
 
+    // Send the updated tutor profile back to the frontend.
     res.json({
       success: true,
       tutor: result.rows[0],
     });
   } catch (error) {
+    // Log any errors that happen while updating the profile.
     console.error("Update tutor profile error:", error.message);
     res.status(500).json({
       success: false,
@@ -252,8 +285,10 @@ const updateTutorProfile = async (req, res) => {
   }
 };
 
+// Allow tutors to delete their own profiles.
 const deleteTutorProfile = async (req, res) => {
   try {
+    // Make sure the logged-in user is a tutor.
     if (req.user.role !== "tutor") {
       return res.status(403).json({
         success: false,
@@ -261,6 +296,7 @@ const deleteTutorProfile = async (req, res) => {
       });
     }
 
+    // Delete the profile only if it belongs to the logged-in tutor.
     const result = await pool.query(
       `DELETE FROM public.tutor_profiles
        WHERE id = $1 AND user_id = $2
@@ -268,6 +304,7 @@ const deleteTutorProfile = async (req, res) => {
       [req.params.id, req.user.userId]
     );
 
+    // Return an error if the profile cannot be found.
     if (!result.rows.length) {
       return res.status(404).json({
         success: false,
@@ -275,11 +312,13 @@ const deleteTutorProfile = async (req, res) => {
       });
     }
 
+    // Confirm that the tutor profile was deleted successfully.
     res.json({
       success: true,
       message: "Tutor profile deleted successfully",
     });
   } catch (error) {
+    // Log any errors that happen while deleting the profile.
     console.error("Delete tutor profile error:", error.message);
     res.status(500).json({
       success: false,
@@ -288,6 +327,7 @@ const deleteTutorProfile = async (req, res) => {
   }
 };
 
+// Export the functions so they can be used in the tutor profile routes.
 module.exports = {
   getTutorProfiles,
   getTutorProfileBySlug,

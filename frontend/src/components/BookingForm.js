@@ -1,22 +1,35 @@
 
+// Enable client-side interactions in this component.
 "use client";
 
+// Import React hooks to manage form data and calculations.
 import { useMemo, useState } from "react";
+
+// Import the router to navigate between pages.
 import { useRouter } from "next/navigation";
+
+// Import the icons used in the booking form.
 import { Icon } from "./Icons";
 
+// Format a date into a readable format for students.
 function formatDate(dateString, options) {
+  // Return an empty value if no date is provided.
   if (!dateString) return "";
 
+  // Create a date object using the selected date.
   const date = new Date(`${dateString.slice(0, 10)}T12:00:00`);
 
+  // Return the original value if the date is invalid.
   if (Number.isNaN(date.getTime())) return dateString;
 
+  // Format the date using Canadian English settings.
   return date.toLocaleDateString("en-CA", options);
 }
 
+// Prepare availability slots in a consistent format.
 function normalizeSlots(slots) {
   return (Array.isArray(slots) ? slots : [])
+    // Convert each slot into the format used by the booking form.
     .map((slot) => ({
       id: String(slot.id ?? ""),
       date: String(slot.date ?? slot.available_date ?? "").slice(0, 10),
@@ -27,6 +40,7 @@ function normalizeSlots(slots) {
         slot.endTime ?? slot.end_time ?? ""
       ).slice(0, 5),
     }))
+    // Remove slots that are missing required information.
     .filter(
       (slot) =>
         slot.id &&
@@ -34,6 +48,7 @@ function normalizeSlots(slots) {
         slot.startTime &&
         slot.endTime
     )
+    // Sort the available slots by date and start time.
     .sort(
       (a, b) =>
         a.date.localeCompare(b.date) ||
@@ -41,15 +56,20 @@ function normalizeSlots(slots) {
     );
 }
 
+// Create the booking form used by students to request tutoring sessions.
 export function BookingForm({ tutor, slots = [] }) {
+  // Initialize the router for navigation after booking.
   const router = useRouter();
 
+  // Prepare the tutor's available time slots.
   const normalizedSlots = useMemo(
     () => normalizeSlots(slots),
     [slots]
   );
 
+  // Prepare the subjects offered by the selected tutor.
   const subjects = useMemo(() => {
+    // Use the tutor's subject list if one is available.
     if (Array.isArray(tutor.subjects)) {
       return tutor.subjects.map((subject) =>
         typeof subject === "string"
@@ -58,6 +78,7 @@ export function BookingForm({ tutor, slots = [] }) {
       );
     }
 
+    // Convert a comma-separated subject list into individual options.
     return String(tutor.subject || "")
       .split(",")
       .map((name) => name.trim())
@@ -65,6 +86,7 @@ export function BookingForm({ tutor, slots = [] }) {
       .map((name) => ({ id: name, name }));
   }, [tutor]);
 
+  // Get the unique dates when the tutor is available.
   const dates = useMemo(
     () => [
       ...new Set(normalizedSlots.map((slot) => slot.date)),
@@ -72,27 +94,33 @@ export function BookingForm({ tutor, slots = [] }) {
     [normalizedSlots]
   );
 
+  // Store the date selected by the student.
   const [selectedDate, setSelectedDate] = useState(
     dates[0] || ""
   );
 
+  // Store the selected availability slot.
   const [slotID, setSlotID] = useState(
     normalizedSlots[0]?.id || ""
   );
 
+  // Store the subject selected for the tutoring session.
   const [subjectID, setSubjectID] = useState(
     subjects[0]?.id || ""
   );
 
+  // Store the session duration and optional learning notes.
   const [duration, setDuration] = useState("60");
   const [note, setNote] = useState("");
 
+  // Track booking progress, errors, and successful submissions.
   const [state, setState] = useState({
     loading: false,
     error: "",
     success: false,
   });
 
+  // Find the available time slots for the selected date.
   const available = useMemo(
     () =>
       normalizedSlots.filter(
@@ -101,25 +129,31 @@ export function BookingForm({ tutor, slots = [] }) {
     [normalizedSlots, selectedDate]
   );
 
+  // Find the specific time slot selected by the student.
   const selectedSlot = normalizedSlots.find(
     (slot) =>
       slot.id === slotID &&
       slot.date === selectedDate
   );
 
+  // Get the tutor's hourly teaching rate.
   const hourlyRate = Number(
     tutor.hourlyRate ?? tutor.hourly_rate ?? 0
   );
 
+  // Calculate the estimated session cost based on duration.
   const total = hourlyRate * (Number(duration) / 60);
 
+  // Update the selected date and choose its first available time slot.
   function selectDate(date) {
     setSelectedDate(date);
 
+    // Find the first available slot for the selected date.
     const firstSlot = normalizedSlots.find(
       (slot) => slot.date === date
     );
 
+    // Update the selected time and clear previous errors.
     setSlotID(firstSlot?.id || "");
     setState((previous) => ({
       ...previous,
@@ -127,9 +161,12 @@ export function BookingForm({ tutor, slots = [] }) {
     }));
   }
 
+  // Handle the submission of a tutoring session request.
   async function submit() {
+    // Prevent another request while a booking is being submitted.
     if (state.loading) return;
 
+    // Make sure the student has selected an available time.
     if (!selectedSlot) {
       setState({
         loading: false,
@@ -139,6 +176,7 @@ export function BookingForm({ tutor, slots = [] }) {
       return;
     }
 
+    // Make sure the student has selected a subject.
     if (!subjectID) {
       setState({
         loading: false,
@@ -148,16 +186,20 @@ export function BookingForm({ tutor, slots = [] }) {
       return;
     }
 
+    // Convert the selected session duration into minutes.
     const durationMinutes = Number(duration);
 
+    // Convert the start time into minutes for comparison.
     const startMinutes =
       Number(selectedSlot.startTime.split(":")[0]) * 60 +
       Number(selectedSlot.startTime.split(":")[1]);
 
+    // Convert the end time into minutes for comparison.
     const endMinutes =
       Number(selectedSlot.endTime.split(":")[0]) * 60 +
       Number(selectedSlot.endTime.split(":")[1]);
 
+    // Make sure the session fits within the tutor's available time.
     if (startMinutes + durationMinutes > endMinutes) {
       setState({
         loading: false,
@@ -168,6 +210,7 @@ export function BookingForm({ tutor, slots = [] }) {
       return;
     }
 
+    // Show the loading state while submitting the booking.
     setState({
       loading: true,
       error: "",
@@ -175,6 +218,7 @@ export function BookingForm({ tutor, slots = [] }) {
     });
 
     try {
+      // Send the booking information to the API.
       const response = await fetch("/api/bookings", {
         method: "POST",
         headers: {
@@ -191,6 +235,7 @@ export function BookingForm({ tutor, slots = [] }) {
         }),
       });
 
+      // Redirect users to login if they are not authenticated.
       if (response.status === 401) {
         const nextPath = `/tutors/${encodeURIComponent(
           tutor.slug
@@ -202,8 +247,10 @@ export function BookingForm({ tutor, slots = [] }) {
         return;
       }
 
+      // Read the response and handle missing JSON safely.
       const data = await response.json().catch(() => ({}));
 
+      // Display an error if the booking request fails.
       if (!response.ok) {
         throw new Error(
           data.error ||
@@ -212,12 +259,14 @@ export function BookingForm({ tutor, slots = [] }) {
         );
       }
 
+      // Mark the booking request as successfully submitted.
       setState({
         loading: false,
         error: "",
         success: true,
       });
     } catch (error) {
+      // Display an error if something goes wrong.
       setState({
         loading: false,
         error:
@@ -228,9 +277,11 @@ export function BookingForm({ tutor, slots = [] }) {
     }
   }
 
+  // Display a confirmation message after a successful booking request.
   if (state.success) {
     return (
       <div className="panel p-8 text-center">
+        {/* Display a success icon. */}
         <span className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#e7f7ed] text-[#149451]">
           <Icon
             name="check"
@@ -242,11 +293,13 @@ export function BookingForm({ tutor, slots = [] }) {
           Request sent
         </h2>
 
+        {/* Explain that the booking is waiting for tutor approval. */}
         <p className="mx-auto mt-3 max-w-md text-[#68758c]">
           Your session with {tutor.name} is pending approval.
           You can track it from your student dashboard.
         </p>
 
+        {/* Allow students to view their submitted bookings. */}
         <button
           type="button"
           onClick={() => router.push("/dashboard/student")}
@@ -258,14 +311,17 @@ export function BookingForm({ tutor, slots = [] }) {
     );
   }
 
+  // Display the booking form and session summary.
   return (
     <div className="grid gap-7 lg:grid-cols-[1fr_360px]">
+      {/* Display the main booking options. */}
       <section className="panel p-6 sm:p-8">
         <div>
           <label className="form-label">
             1. Choose a date
           </label>
 
+          {/* Show the dates when the tutor is available. */}
           {dates.length > 0 ? (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               {dates.map((item) => (
@@ -279,12 +335,14 @@ export function BookingForm({ tutor, slots = [] }) {
                       : "border-[#e0e5ee]"
                   }`}
                 >
+                  {/* Display the weekday. */}
                   <span className="block text-xs font-bold uppercase text-[#7c879a]">
                     {formatDate(item, {
                       weekday: "short",
                     })}
                   </span>
 
+                  {/* Display the month and day. */}
                   <span className="mt-1 block font-extrabold">
                     {formatDate(item, {
                       month: "short",
@@ -295,6 +353,7 @@ export function BookingForm({ tutor, slots = [] }) {
               ))}
             </div>
           ) : (
+            // Show a message when the tutor has no available dates.
             <p className="rounded-xl bg-[#fff8dc] p-4 text-sm text-[#725b00]">
               This tutor has not published any available
               booking times yet.
@@ -302,6 +361,7 @@ export function BookingForm({ tutor, slots = [] }) {
           )}
         </div>
 
+        {/* Allow students to select an available time. */}
         <div className="mt-7">
           <label className="form-label">
             2. Select a time
@@ -325,12 +385,14 @@ export function BookingForm({ tutor, slots = [] }) {
           </div>
         </div>
 
+        {/* Allow students to choose a subject and session duration. */}
         <div className="mt-7 grid gap-5 sm:grid-cols-2">
           <label>
             <span className="form-label">
               3. Subject
             </span>
 
+            {/* Display the subjects offered by the tutor. */}
             <select
               value={subjectID}
               onChange={(event) =>
@@ -354,6 +416,7 @@ export function BookingForm({ tutor, slots = [] }) {
               4. Session duration
             </span>
 
+            {/* Allow students to select the length of the session. */}
             <select
               value={duration}
               onChange={(event) =>
@@ -368,6 +431,7 @@ export function BookingForm({ tutor, slots = [] }) {
           </label>
         </div>
 
+        {/* Allow students to describe what they want to learn. */}
         <label className="mt-6 block">
           <span className="form-label">
             What would you like help with?{" "}
@@ -387,6 +451,7 @@ export function BookingForm({ tutor, slots = [] }) {
           />
         </label>
 
+        {/* Display an error message if the booking cannot be submitted. */}
         {state.error && (
           <p
             role="alert"
@@ -397,27 +462,32 @@ export function BookingForm({ tutor, slots = [] }) {
         )}
       </section>
 
+      {/* Display the selected session details and estimated cost. */}
       <aside className="panel h-fit p-6 lg:sticky lg:top-24">
         <h2 className="text-lg font-extrabold">
           Booking summary
         </h2>
 
         <div className="mt-5 space-y-4 text-sm">
+          {/* Display the selected tutor's name. */}
           <Row
             label="Tutor"
             value={tutor.name}
           />
 
+          {/* Display the tutor's hourly rate. */}
           <Row
             label="Hourly rate"
             value={`$${hourlyRate.toFixed(2)}`}
           />
 
+          {/* Display the selected session duration. */}
           <Row
             label="Duration"
             value={`${duration} minutes`}
           />
 
+          {/* Display the estimated session cost. */}
           <Row
             label="Session estimate"
             value={`$${total.toFixed(2)}`}
@@ -425,11 +495,13 @@ export function BookingForm({ tutor, slots = [] }) {
           />
         </div>
 
+        {/* Explain that payments are not collected in the current MVP. */}
         <div className="mt-6 rounded-xl bg-[#fff8dc] p-4 text-xs leading-5 text-[#725b00]">
           This MVP submits a booking request only.
           No payment will be taken.
         </div>
 
+        {/* Submit the booking request when all required options are selected. */}
         <button
           type="button"
           onClick={submit}
@@ -449,13 +521,16 @@ export function BookingForm({ tutor, slots = [] }) {
   );
 }
 
+// Create a reusable row for displaying booking summary information.
 function Row({ label, value, strong = false }) {
   return (
     <div className="flex items-center justify-between gap-4">
+      {/* Display the summary label. */}
       <span className="text-[#748096]">
         {label}
       </span>
 
+      {/* Display the value with optional emphasis. */}
       <span
         className={
           strong

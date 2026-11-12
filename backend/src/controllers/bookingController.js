@@ -1,8 +1,11 @@
 
+// Import the database connection to manage student bookings.
 const pool = require("../config/db");
 
+// These are the session lengths students can choose, in minutes.
 const VALID_DURATIONS = [30, 60, 90];
 
+// Check that the date is valid and follows the YYYY-MM-DD format.
 function isValidDate(value) {
   if (
     typeof value !== "string" ||
@@ -11,14 +14,17 @@ function isValidDate(value) {
     return false;
   }
 
+  // Convert the date into a JavaScript Date object.
   const date = new Date(`${value}T00:00:00Z`);
 
+  // Make sure the date exists and matches the original value.
   return (
     !Number.isNaN(date.getTime()) &&
     date.toISOString().slice(0, 10) === value
   );
 }
 
+// Check that the time uses a valid 24-hour format.
 function isValidTime(value) {
   return (
     typeof value === "string" &&
@@ -26,6 +32,7 @@ function isValidTime(value) {
   );
 }
 
+// Organize booking information into an object for the frontend.
 function formatBooking(row) {
   return {
     id: String(row.id),
@@ -43,21 +50,26 @@ function formatBooking(row) {
   };
 }
 
+// Get the bookings that belong to the logged-in student or tutor.
 async function getBookings(req, res) {
   try {
+    // Get the user's ID and role from their authentication details.
     const { userId, role } = req.user;
 
+    // Only students and tutors can view bookings.
     if (!["student", "tutor"].includes(role)) {
       return res.status(403).json({
         error: "Access denied.",
       });
     }
 
+    // Students see their own bookings, while tutors see bookings made with them.
     const column =
       role === "student"
         ? "b.student_id"
         : "b.tutor_id";
 
+    // Get the bookings and include the student and tutor names.
     const result = await pool.query(
       `SELECT
          b.*,
@@ -71,11 +83,13 @@ async function getBookings(req, res) {
       [userId]
     );
 
+    // Send the bookings back in a consistent format.
     return res.json({
       success: true,
       bookings: result.rows.map(formatBooking),
     });
   } catch (error) {
+    // Log any errors that happen while loading bookings.
     console.error("Get bookings error:", error);
 
     return res.status(500).json({
@@ -84,16 +98,20 @@ async function getBookings(req, res) {
   }
 }
 
+// Allow a student to request a session with a tutor.
 async function createBooking(req, res) {
+  // Get a database connection for the booking transaction.
   const client = await pool.connect();
 
   try {
+    // Only students can create booking requests.
     if (req.user?.role !== "student") {
       return res.status(403).json({
         error: "Only students can request bookings.",
       });
     }
 
+    // Get the booking details submitted by the student.
     const {
       tutorID,
       slotID,
@@ -104,8 +122,10 @@ async function createBooking(req, res) {
       note = "",
     } = req.body || {};
 
+    // Convert the selected session duration into a number.
     const durationMinutes = Number(duration);
 
+    // Check that all required booking details are valid.
     if (
       !tutorID ||
       !slotID ||
@@ -121,8 +141,10 @@ async function createBooking(req, res) {
       });
     }
 
+    // Start a transaction so the booking checks and insert stay together.
     await client.query("BEGIN");
 
+    // Find the selected tutor and confirm the account belongs to a tutor.
     const tutorResult = await client.query(
       `SELECT
          tp.id AS profile_id,
@@ -136,6 +158,7 @@ async function createBooking(req, res) {
       [tutorID]
     );
 
+    // Stop the booking if the tutor profile does not exist.
     if (!tutorResult.rows.length) {
       await client.query("ROLLBACK");
 
@@ -144,13 +167,16 @@ async function createBooking(req, res) {
       });
     }
 
+    // Get the tutor's profile information.
     const tutor = tutorResult.rows[0];
 
+    // Turn the tutor's subject list into an array.
     const tutorSubjects = String(tutor.subject || "")
       .split(",")
       .map((subject) => subject.trim())
       .filter(Boolean);
 
+    // Make sure the tutor offers the subject selected by the student.
     if (!tutorSubjects.includes(String(subjectID))) {
       await client.query("ROLLBACK");
 
@@ -159,6 +185,7 @@ async function createBooking(req, res) {
       });
     }
 
+    // Find the selected time slot and lock it while processing the booking.
     const slotResult = await client.query(
       `SELECT
          id,
@@ -180,6 +207,7 @@ async function createBooking(req, res) {
       ]
     );
 
+    // Stop if the selected time slot is no longer available.
     if (!slotResult.rows.length) {
       await client.query("ROLLBACK");
 
@@ -188,8 +216,10 @@ async function createBooking(req, res) {
       });
     }
 
+    // Get the available time slot from the database.
     const slot = slotResult.rows[0];
 
+    // Convert a time value into minutes so it is easier to compare.
     const toMinutes = (value) => {
       const [hours, minutes] = String(value)
         .split(":")
@@ -198,9 +228,11 @@ async function createBooking(req, res) {
       return hours * 60 + minutes;
     };
 
+    // Calculate when the available slot starts and ends.
     const startMinutes = toMinutes(slot.start_time);
     const endMinutes = toMinutes(slot.end_time);
 
+    // Make sure the requested session fits within the available time.
     if (startMinutes + durationMinutes > endMinutes) {
       await client.query("ROLLBACK");
 
@@ -210,6 +242,7 @@ async function createBooking(req, res) {
       });
     }
 
+    // Check whether another active booking overlaps with this time.
     const conflict = await client.query(
       `SELECT id
        FROM public.bookings
@@ -233,6 +266,7 @@ async function createBooking(req, res) {
       ]
     );
 
+    // Prevent the tutor from receiving overlapping booking requests.
     if (conflict.rows.length) {
       await client.query("ROLLBACK");
 
@@ -242,6 +276,7 @@ async function createBooking(req, res) {
       });
     }
 
+    // Save the new booking with a pending status.
     const result = await client.query(
       `INSERT INTO public.bookings
         (
@@ -267,14 +302,17 @@ async function createBooking(req, res) {
       ]
     );
 
+    // Save the transaction after the booking is created successfully.
     await client.query("COMMIT");
 
+    // Confirm that the booking request was submitted.
     return res.status(201).json({
       success: true,
       message: "Booking request submitted.",
       booking: result.rows[0],
     });
   } catch (error) {
+    // Undo the transaction if something goes wrong.
     await client.query("ROLLBACK");
 
     console.error("Create booking error:", error);
@@ -283,17 +321,22 @@ async function createBooking(req, res) {
       error: "Unable to create booking.",
     });
   } finally {
+    // Release the database connection when the request is finished.
     client.release();
   }
 }
 
+// Allow students and tutors to update a booking's status.
 async function updateBookingStatus(req, res) {
+  // Get a database connection for the status update.
   const client = await pool.connect();
 
   try {
+    // Get the current user's details and the requested status.
     const { userId, role } = req.user;
     const { status } = req.body || {};
 
+    // Only accept the booking statuses supported by the application.
     if (
       ![
         "accepted",
@@ -307,8 +350,10 @@ async function updateBookingStatus(req, res) {
       });
     }
 
+    // Start a transaction before updating the booking.
     await client.query("BEGIN");
 
+    // Find the booking and lock it while checking the status change.
     const result = await client.query(
       `SELECT *
        FROM public.bookings
@@ -317,6 +362,7 @@ async function updateBookingStatus(req, res) {
       [req.params.id]
     );
 
+    // Stop if the booking does not exist.
     if (!result.rows.length) {
       await client.query("ROLLBACK");
 
@@ -325,16 +371,20 @@ async function updateBookingStatus(req, res) {
       });
     }
 
+    // Get the existing booking details.
     const booking = result.rows[0];
 
+    // Check whether the logged-in student owns this booking.
     const isStudent =
       role === "student" &&
       String(booking.student_id) === String(userId);
 
+    // Check whether the logged-in tutor is assigned to this booking.
     const isTutor =
       role === "tutor" &&
       String(booking.tutor_id) === String(userId);
 
+    // Prevent other users from changing someone else's booking.
     if (!isStudent && !isTutor) {
       await client.query("ROLLBACK");
 
@@ -343,8 +393,10 @@ async function updateBookingStatus(req, res) {
       });
     }
 
+    // Start by assuming the requested status change is not allowed.
     let allowed = false;
 
+    // Students can cancel bookings that are pending or accepted.
     if (isStudent) {
       allowed =
         ["pending", "accepted"].includes(
@@ -352,6 +404,8 @@ async function updateBookingStatus(req, res) {
         ) && status === "cancelled";
     }
 
+    // Tutors can accept or decline pending bookings.
+    // They can also mark accepted bookings as completed.
     if (isTutor) {
       allowed =
         (booking.status === "pending" &&
@@ -360,6 +414,7 @@ async function updateBookingStatus(req, res) {
           status === "completed");
     }
 
+    // Reject status changes that do not follow these rules.
     if (!allowed) {
       await client.query("ROLLBACK");
 
@@ -368,6 +423,7 @@ async function updateBookingStatus(req, res) {
       });
     }
 
+    // Update the booking status in the database.
     const updated = await client.query(
       `UPDATE public.bookings
        SET status = $1
@@ -376,14 +432,17 @@ async function updateBookingStatus(req, res) {
       [status, booking.id]
     );
 
+    // Save the changes once the update succeeds.
     await client.query("COMMIT");
 
+    // Send the updated booking information back to the frontend.
     return res.json({
       success: true,
       message: "Booking updated successfully.",
       booking: formatBooking(updated.rows[0]),
     });
   } catch (error) {
+    // Undo any changes if the update fails.
     await client.query("ROLLBACK");
 
     console.error("Update booking error:", error);
@@ -392,10 +451,12 @@ async function updateBookingStatus(req, res) {
       error: "Unable to update booking.",
     });
   } finally {
+    // Return the database connection to the pool.
     client.release();
   }
 }
 
+// Export the booking functions so they can be used in the routes.
 module.exports = {
   getBookings,
   createBooking,
