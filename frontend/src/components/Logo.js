@@ -1,5 +1,6 @@
 
 import Link from "next/link";
+import Image from "next/image";
 
 export function Logo({ light = false }) {
   return (
@@ -8,16 +9,19 @@ export function Logo({ light = false }) {
       className="inline-flex items-center gap-2.5"
       aria-label="TuLinkUp home"
     >
-      <span className="relative grid h-10 w-10 place-items-center rounded-xl bg-[#26469b] text-white shadow-sm">
-        <span className="absolute -top-1 h-3.5 w-7 rotate-0 border-x-[14px] border-b-[10px] border-x-transparent border-b-[#26469b]" />
+      {/* Actual TuLinkUp SVG logo */}
+      <Image
+        src="/images/logo.svg"
+        alt=""
+        width={44}
+        height={44}
+        priority
+        className="h-10 w-10 object-contain sm:h-11 sm:w-11"
+      />
 
-        <span className="mt-1 text-[10px] font-extrabold">
-          TU
-        </span>
-      </span>
-
+      {/* TuLinkUp brand name */}
       <span
-        className={`text-xl font-bold tracking-[-0.03em] ${
+        className={`text-xl font-bold tracking-[-0.03em] sm:text-2xl ${
           light ? "text-white" : "text-[#173472]"
         }`}
       >
