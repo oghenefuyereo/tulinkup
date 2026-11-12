@@ -33,10 +33,11 @@ This development environment allows me to practice JavaScript programming, datab
 
 # Future Work
 
-- Complete student and tutor registration and authentication.
-- Implement tutor search, filtering, and profile management.
-- Integrate Supabase PostgreSQL for secure data storage.
-- Develop interactive student and tutor dashboards.
-- Add tutor availability and session booking functionality.
-- Improve application security, performance, and user experience.
-- Test and deploy the application for public use.
+- Integrate secure online payments for tutoring sessions.
+- Implement real-time messaging between students and tutors.
+- Add email notifications and booking reminders.
+- Develop a tutor rating and review system.
+- Improve application security, performance, and error handling.
+- Enhance the user interface and mobile responsiveness.
+- Conduct comprehensive testing and fix remaining bugs.
+- Deploy TuLinkUp for public use and continue improving the platform based on user feedback.
