@@ -8,7 +8,7 @@ I am using JavaScript to develop the application's core functionality, including
 
 My purpose for developing TuLinkUp is to deepen my understanding of JavaScript, strengthen my problem-solving skills, and gain experience writing clean, reusable, and maintainable code. As I continue building the platform, I want to apply what I learn to create reliable software solutions that solve real-world problems and support the long-term growth of Inovenatic Group.
 
-[Software Demo Video](http://youtube.link.goes.here)
+[Software Demo Video](https://youtu.be/3aJ22Dq3qv4)
 
 # Development Environment
 
