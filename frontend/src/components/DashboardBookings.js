@@ -1,34 +1,24 @@
 
-// Enable client-side interactions in this component.
+// Enable client-side interactions.
 "use client";
 
-// Import Link to navigate to tutor profiles and other pages.
+// Import required components and hooks.
 import Link from "next/link";
-
-// Import the router to refresh booking information.
 import { useRouter } from "next/navigation";
-
-// Import useState to manage errors and loading progress.
 import { useState } from "react";
-
-// Import the icons used in the booking dashboard.
 import { Icon } from "./Icons";
 
 // Format a booking date into a readable format.
 function formatDate(value) {
-  // Display a message if no date is available.
   if (!value) return "Date unavailable";
 
-  // Extract the date and create a JavaScript Date object.
   const dateText = String(value).slice(0, 10);
   const date = new Date(`${dateText}T12:00:00Z`);
 
-  // Return the original date if it cannot be formatted.
   if (Number.isNaN(date.getTime())) {
     return dateText;
   }
 
-  // Display the date using Canadian English formatting.
   return date.toLocaleDateString("en-CA", {
     weekday: "short",
     month: "short",
@@ -37,78 +27,101 @@ function formatDate(value) {
   });
 }
 
-// Format the booking time to show hours and minutes.
+// Format the booking time.
 function formatTime(value) {
-  // Display a message if no time is available.
   if (!value) return "Time unavailable";
 
-  // Separate the time into parts and remove seconds if present.
   const parts = String(value).split(":");
+
   return `${parts[0]}:${parts[1]}`;
 }
 
-// Create the component for managing bookings on user dashboards.
-export function DashboardBookings({ bookings = [], role }) {
-  // Initialize the router for refreshing booking information.
+// Create the component for managing dashboard bookings.
+export function DashboardBookings({
+  bookings = [],
+  role,
+}) {
   const router = useRouter();
 
-  // Store error messages and track which action is processing.
+  // Manage error messages and loading progress.
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
 
   // Update the status of a booking.
   async function update(id, status) {
+    // Prevent multiple requests at the same time.
+    if (busy) return;
+
     // Track the selected booking and action.
     setBusy(`${id}-${status}`);
 
-    // Clear previous error messages.
+    // Clear previous errors.
     setError("");
 
     try {
-      // Send the booking ID and new status to the API.
-      const response = await fetch("/api/bookings/update", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          id: String(id),
-          status,
-        }),
-      });
+      // Send the booking update to the correct API.
+      const response = await fetch(
+        "/api/bookings/status",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({
+            id: String(id),
+            status,
+          }),
+        }
+      );
 
-      // Read the response returned by the API.
-      const data = await response.json();
+      // Safely read the API response.
+      const data = await response
+        .json()
+        .catch(() => null);
 
-      // Display an error if the booking cannot be updated.
+      // Handle unsuccessful booking updates.
       if (!response.ok) {
         setError(
-          data.error ||
-            data.message ||
-            "Unable to update booking."
+          data?.error ||
+            data?.message ||
+            `Unable to update booking (${response.status}).`
         );
+
         return;
       }
 
-      // Refresh the dashboard to show the updated booking status.
+      // Handle invalid or unexpected responses.
+      if (!data || data.success === false) {
+        setError(
+          data?.error ||
+            data?.message ||
+            "The booking service returned an invalid response."
+        );
+
+        return;
+      }
+
+      // Refresh the dashboard to display the updated booking.
       router.refresh();
     } catch (err) {
-      // Handle unexpected errors during the update.
+      // Log unexpected errors.
       console.error("Booking update failed:", err);
+
       setError(
         "Unable to update booking. Please try again."
       );
     } finally {
-      // Clear the loading state after the request finishes.
+      // Clear the loading state.
       setBusy("");
     }
   }
 
-  // Display a message when the user has no bookings.
+  // Display a message when there are no bookings.
   if (!bookings.length) {
     return (
       <div className="panel p-10 text-center">
-        {/* Display a calendar icon. */}
+        {/* Display the booking calendar icon. */}
         <span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[#edf1fa] text-[#26469b]">
           <Icon
             name="calendar"
@@ -120,14 +133,14 @@ export function DashboardBookings({ bookings = [], role }) {
           No bookings here yet
         </h3>
 
-        {/* Show a different message for students and tutors. */}
+        {/* Display a message based on the user's role. */}
         <p className="mt-2 text-sm text-[#71809a]">
           {role === "student"
             ? "Browse tutors and send your first request."
             : "New student requests will appear here."}
         </p>
 
-        {/* Allow students to browse tutors and make a booking. */}
+        {/* Allow students to browse available tutors. */}
         {role === "student" && (
           <Link
             href="/tutors"
@@ -143,7 +156,7 @@ export function DashboardBookings({ bookings = [], role }) {
   // Display the user's existing bookings.
   return (
     <div className="space-y-4">
-      {/* Display an error message if a booking update fails. */}
+      {/* Display booking update errors. */}
       {error && (
         <p
           role="alert"
@@ -158,25 +171,25 @@ export function DashboardBookings({ bookings = [], role }) {
         // Convert the booking ID into a string.
         const bookingId = String(booking.id);
 
-        // Get the tutor's name or use a default value.
+        // Retrieve the tutor's name.
         const tutorName =
           booking.tutorName ||
           booking.tutor ||
           "Tutor";
 
-        // Get the student's name or use a default value.
+        // Retrieve the student's name.
         const studentName =
           booking.studentName ||
           booking.student ||
           "Student";
 
-        // Get the subject associated with the booking.
+        // Retrieve the booked subject.
         const subject =
           booking.subjectName ||
           booking.subject ||
           "Tutoring session";
 
-        // Get the session duration or use 60 minutes by default.
+        // Retrieve the session duration.
         const duration =
           booking.duration ??
           booking.duration_minutes ??
@@ -187,7 +200,7 @@ export function DashboardBookings({ bookings = [], role }) {
             key={bookingId}
             className="panel flex flex-col gap-5 p-5 sm:flex-row sm:items-center"
           >
-            {/* Display a calendar icon for the booking. */}
+            {/* Display the calendar icon. */}
             <div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-[#edf1fa] text-[#26469b]">
               <Icon
                 name="calendar"
@@ -195,10 +208,10 @@ export function DashboardBookings({ bookings = [], role }) {
               />
             </div>
 
-            {/* Display the booking information. */}
+            {/* Display booking information. */}
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                {/* Show the tutor's name to students and the student's name to tutors. */}
+                {/* Display the tutor or student name. */}
                 <h3 className="font-extrabold">
                   {role === "student"
                     ? tutorName
@@ -209,29 +222,37 @@ export function DashboardBookings({ bookings = [], role }) {
                 <Status value={booking.status} />
               </div>
 
-              {/* Display the subject of the tutoring session. */}
+              {/* Display the booked subject. */}
               <p className="mt-1 text-sm font-semibold text-[#58657d]">
                 {subject}
               </p>
 
-              {/* Display the booking date, time, and duration. */}
+              {/* Display the session date, time, and duration. */}
               <p className="mt-2 text-xs text-[#7c879a]">
-                {formatDate(booking.date || booking.booking_date)}
-                {" · "}
-                {formatTime(
-                  booking.startTime || booking.booking_time
+                {formatDate(
+                  booking.date || booking.booking_date
                 )}
+
                 {" · "}
+
+                {formatTime(
+                  booking.startTime ||
+                    booking.booking_time
+                )}
+
+                {" · "}
+
                 {duration} min
               </p>
             </div>
 
-            {/* Display the available actions based on the user's role and booking status. */}
+            {/* Display actions based on role and status. */}
             <div className="flex flex-wrap gap-2">
               {/* Allow tutors to accept or decline pending bookings. */}
               {role === "tutor" &&
                 booking.status === "pending" && (
                   <>
+                    {/* Accept booking. */}
                     <button
                       type="button"
                       disabled={Boolean(busy)}
@@ -245,6 +266,7 @@ export function DashboardBookings({ bookings = [], role }) {
                         : "Accept"}
                     </button>
 
+                    {/* Decline booking. */}
                     <button
                       type="button"
                       disabled={Boolean(busy)}
@@ -260,7 +282,7 @@ export function DashboardBookings({ bookings = [], role }) {
                   </>
                 )}
 
-              {/* Allow tutors to mark accepted bookings as completed. */}
+              {/* Allow tutors to complete accepted bookings. */}
               {role === "tutor" &&
                 booking.status === "accepted" && (
                   <button
@@ -277,7 +299,7 @@ export function DashboardBookings({ bookings = [], role }) {
                   </button>
                 )}
 
-              {/* Allow students to cancel pending or accepted bookings. */}
+              {/* Allow students to cancel their bookings. */}
               {role === "student" &&
                 ["pending", "accepted"].includes(
                   booking.status
@@ -296,7 +318,7 @@ export function DashboardBookings({ bookings = [], role }) {
                   </button>
                 )}
 
-              {/* Allow students to open the tutor's public profile. */}
+              {/* Allow students to view the tutor's profile. */}
               {role === "student" &&
                 booking.tutorSlug && (
                   <Link
@@ -314,9 +336,9 @@ export function DashboardBookings({ bookings = [], role }) {
   );
 }
 
-// Create a reusable badge for displaying booking statuses.
+// Create a reusable booking status badge.
 function Status({ value }) {
-  // Choose the badge colour based on the booking status.
+  // Select the badge colour based on the booking status.
   const color =
     value === "accepted"
       ? "bg-green-50 text-green-700"
@@ -326,7 +348,7 @@ function Status({ value }) {
           ? "bg-blue-50 text-blue-700"
           : "bg-slate-100 text-slate-600";
 
-  // Display the booking status using the selected colour.
+  // Display the booking status.
   return (
     <span
       className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wide ${color}`}

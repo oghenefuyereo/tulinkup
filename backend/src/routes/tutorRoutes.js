@@ -1,11 +1,11 @@
 
-// Import Express to create routes for tutor information.
+// Import Express to create tutor routes.
 const express = require("express");
 
-// Import the middleware that checks whether a user is logged in.
+// Import authentication middleware.
 const { protect } = require("../middleware/authMiddleware");
 
-// Import the functions that handle tutor profiles and availability details.
+// Import tutor controller functions.
 const {
   getMyTutorProfile,
   getTutors,
@@ -13,23 +13,20 @@ const {
   getTutorExtras,
 } = require("../controllers/tutorController");
 
-// Create a router to handle tutor requests.
+// Create the Express router.
 const router = express.Router();
 
-// Private tutor dashboard profile
-// Allow logged-in tutors to view their own profile information.
+// Private tutor dashboard profile.
 router.get("/me/profile", protect, getMyTutorProfile);
 
-// Public tutor discovery
-// Allow visitors to view the list of available tutor profiles.
+// Public tutor marketplace.
 router.get("/", getTutors);
 
-// Public tutor profile and additional details
-// Get additional tutor information, including upcoming availability.
+// Public tutor availability and reviews.
 router.get("/:slug/extras", getTutorExtras);
 
-// Get a specific tutor's public profile using their URL slug.
+// Public individual tutor profile.
 router.get("/:slug", getTutorBySlug);
 
-// Export the router so it can be used in the main server.
+// Export the router.
 module.exports = router;
