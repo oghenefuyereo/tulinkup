@@ -99,7 +99,10 @@ export default async function TutorDashboard() {
   }
 
   // Create a variable to store the authenticated user's information.
-  let user;
+  let user = null;
+
+  // Track unexpected authentication errors.
+  let authenticationError = false;
 
   try {
     // Verify the tutor's login through the Express backend.
@@ -108,7 +111,11 @@ export default async function TutorDashboard() {
     // Log unexpected authentication errors.
     console.error("Tutor authentication error:", error);
 
-    // Show an error message if the account cannot be verified.
+    authenticationError = true;
+  }
+
+  // Show an error message if the account cannot be verified.
+  if (authenticationError) {
     return (
       <SignedOutState title="Unable to verify your tutor account" />
     );
@@ -170,14 +177,22 @@ export default async function TutorDashboard() {
           </p>
         </div>
 
-        {/* Provide links to manage the tutor's profile and availability. */}
-        <div className="flex gap-3">
+        {/* Provide links to manage the tutor's profile, availability, and group classes. */}
+        <div className="flex flex-wrap gap-3">
           <Link href="/profile" className="btn-secondary">
             Manage profile
           </Link>
 
-          <Link href="/availability" className="btn-primary">
+          <Link href="/availability" className="btn-secondary">
             Set availability
+          </Link>
+
+          {/* Allow tutors to manage their group live classes. */}
+          <Link
+            href="/dashboard/tutor/group-classes"
+            className="btn-primary"
+          >
+            Group Live Classes
           </Link>
         </div>
       </div>
@@ -238,6 +253,52 @@ export default async function TutorDashboard() {
           </p>
         )}
       </div>
+
+      {/* Display the tutor's group live classes section. */}
+      <section className="mt-9">
+        <div className="panel p-6">
+          <p className="eyebrow">
+            TuLinkUp Group Learning
+          </p>
+
+          <h2 className="mt-2 text-xl font-extrabold">
+            Teach More Students. Expand Your Reach.
+          </h2>
+
+          <p className="mt-2 text-[#71809a]">
+            Create affordable group classes, teach multiple
+            students at the same time, and expand your
+            tutoring opportunities.
+          </p>
+
+          {/* Provide access to group class management. */}
+          <div className="mt-5 flex flex-wrap gap-3">
+            {/* Allow tutors to create new group classes. */}
+            <Link
+              href="/dashboard/tutor/group-classes/create"
+              className="btn-primary"
+            >
+              Create Group Class
+            </Link>
+
+            {/* Allow tutors to manage their existing group classes. */}
+            <Link
+              href="/dashboard/tutor/group-classes"
+              className="btn-secondary"
+            >
+              Manage Group Classes
+            </Link>
+
+            {/* Allow tutors to explore published group classes. */}
+            <Link
+              href="/group-classes"
+              className="btn-secondary"
+            >
+              Browse Group Classes
+            </Link>
+          </div>
+        </div>
+      </section>
 
       {/* Display booking requests that need the tutor's attention. */}
       <section className="mt-9">

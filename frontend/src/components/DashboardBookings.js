@@ -244,10 +244,46 @@ export function DashboardBookings({
 
                 {duration} min
               </p>
+
+              {/* Display the live classroom integration notice. */}
+              {["tutor", "student"].includes(role) &&
+                booking.status === "accepted" && (
+                  <p className="mt-2 text-xs text-[#64748b]">
+                    Live session access will become
+                    available after video integration.
+                  </p>
+                )}
             </div>
 
             {/* Display actions based on role and status. */}
             <div className="flex flex-wrap gap-2">
+
+              {/* Allow tutors to start an accepted live session. */}
+              {role === "tutor" &&
+                booking.status === "accepted" && (
+                  <button
+                    type="button"
+                    disabled
+                    title="Live classroom integration is pending"
+                    className="cursor-not-allowed rounded-xl bg-[#26469b] px-4 py-2.5 text-sm font-bold text-white opacity-50"
+                  >
+                    Start Live Session
+                  </button>
+                )}
+
+              {/* Allow students to join an accepted live session. */}
+              {role === "student" &&
+                booking.status === "accepted" && (
+                  <button
+                    type="button"
+                    disabled
+                    title="Live classroom integration is pending"
+                    className="cursor-not-allowed rounded-xl bg-[#26469b] px-4 py-2.5 text-sm font-bold text-white opacity-50"
+                  >
+                    Join Live Session
+                  </button>
+                )}
+
               {/* Allow tutors to accept or decline pending bookings. */}
               {role === "tutor" &&
                 booking.status === "pending" && (

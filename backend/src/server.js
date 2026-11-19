@@ -1,4 +1,3 @@
-
 // Load environment variables so the app can use settings from the .env file.
 require("dotenv").config();
 
@@ -21,6 +20,12 @@ const subjectRoutes = require("./routes/subjectRoutes");
 const tagRoutes = require("./routes/tagRoutes");
 const tutorProfileRoutes = require("./routes/tutorProfileRoutes");
 const userRoutes = require("./routes/userRoutes");
+
+// Import the Group Live Classes routes.
+const groupClassRoutes = require("./routes/groupClassRoutes");
+
+// Import the Live Session routes.
+const liveSessionRoutes = require("./routes/liveSessionRoutes");
 
 // Create the Express app and set the port it will run on.
 const app = express();
@@ -81,6 +86,12 @@ app.use("/api/subjects", subjectRoutes);
 app.use("/api/tags", tagRoutes);
 app.use("/api/tutor-profiles", tutorProfileRoutes);
 app.use("/api/users", userRoutes);
+
+// Connect the Group Live Classes API.
+app.use("/api/group-classes", groupClassRoutes);
+
+// Connect the Live Session API for one-on-one and group classrooms.
+app.use("/api/live-sessions", liveSessionRoutes);
 
 // Return a 404 response when someone requests an endpoint that does not exist.
 app.use((req, res) => {

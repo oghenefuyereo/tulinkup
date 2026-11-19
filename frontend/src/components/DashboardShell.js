@@ -19,22 +19,77 @@ export function DashboardShell({
     role === "student"
       ? [
           // Navigation options for student accounts.
-          ["dashboard", "Overview", "/dashboard/student"],
-          ["search", "Browse tutors", "/tutors"],
-          ["user", "My profile", "/profile"],
+          [
+            "dashboard",
+            "Overview",
+            "/dashboard/student",
+          ],
+
+          // Browse available tutors.
+          [
+            "search",
+            "Browse tutors",
+            "/tutors",
+          ],
+
+          // Browse available group live classes.
+          [
+            "calendar",
+            "Browse group classes",
+            "/group-classes",
+          ],
+
+          // View and manage enrolled group classes.
+          [
+            "book",
+            "My group classes",
+            "/dashboard/student/group-classes",
+          ],
+
+          // Manage the student's personal profile.
+          [
+            "user",
+            "My profile",
+            "/profile",
+          ],
         ]
       : [
           // Navigation options for tutor accounts.
-          ["dashboard", "Overview", "/dashboard/tutor"],
-          ["user", "Manage profile", "/profile"],
-          ["calendar", "Availability", "/availability"],
+          [
+            "dashboard",
+            "Overview",
+            "/dashboard/tutor",
+          ],
+
+          // Manage the tutor's professional profile.
+          [
+            "user",
+            "Manage profile",
+            "/profile",
+          ],
+
+          // Manage tutoring availability.
+          [
+            "calendar",
+            "Availability",
+            "/availability",
+          ],
+
+          // Create and manage group live classes.
+          [
+            "book",
+            "Group Live Classes",
+            "/dashboard/tutor/group-classes",
+          ],
         ];
 
   // Display the dashboard layout and navigation.
   return (
     <>
       {/* Main container for the dashboard pages. */}
-      <div className="min-h-screen bg-[#f7f9fd]">
+      {/* Add bottom padding to prevent mobile navigation
+          from covering dashboard content. */}
+      <div className="min-h-screen bg-[#f7f9fd] pb-24 lg:pb-0">
         <div className="page-wrap grid gap-8 py-8 lg:grid-cols-[230px_1fr]">
           {/* Display the sidebar navigation on larger screens. */}
           <aside className="hidden lg:block">
@@ -45,28 +100,31 @@ export function DashboardShell({
                   {role} account
                 </p>
 
-                <p className="mt-1 font-extrabold">
+                <p className="mt-1 break-words font-extrabold">
                   {name}
                 </p>
               </div>
 
               {/* Display navigation links for the user's dashboard. */}
-              <nav className="mt-4 space-y-1">
+              <nav
+                aria-label={`${role} dashboard navigation`}
+                className="mt-4 space-y-1"
+              >
                 {/* Create a navigation link for each menu item. */}
                 {items.map(([icon, label, href]) => (
                   <Link
                     key={href}
                     href={href}
-                    className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-bold text-[#5a6780] hover:bg-[#edf1fa] hover:text-[#173472]"
+                    className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-bold text-[#5a6780] transition-colors hover:bg-[#edf1fa] hover:text-[#173472]"
                   >
                     {/* Display the icon associated with the menu item. */}
                     <Icon
                       name={icon}
-                      className="h-5 w-5"
+                      className="h-5 w-5 shrink-0"
                     />
 
                     {/* Display the navigation link name. */}
-                    {label}
+                    <span>{label}</span>
                   </Link>
                 ))}
               </nav>
@@ -80,8 +138,8 @@ export function DashboardShell({
         </div>
       </div>
 
-      {/* Display the navigation menu for mobile devices. */}
-      <MobileNav />
+      {/* Display role-based navigation for mobile devices. */}
+      <MobileNav role={role} />
     </>
   );
 }

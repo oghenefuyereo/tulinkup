@@ -75,10 +75,31 @@ export function Header() {
 
   // Define the main navigation links.
   const links = [
+    // Browse available tutors.
     { href: "/tutors", label: "Find a tutor" },
+
+    // Browse available group live classes.
+    { href: "/group-classes", label: "Group Classes" },
+
+    // Learn how TuLinkUp works.
     { href: "/#how-it-works", label: "How it works" },
+
+    // Explore available subjects.
     { href: "/#subjects", label: "Subjects" },
   ];
+
+  // Check whether a navigation link is currently active.
+  function isActiveLink(href) {
+    // Do not highlight homepage section links based on pathname.
+    if (href.includes("#")) {
+      return false;
+    }
+
+    return (
+      pathname === href ||
+      pathname.startsWith(`${href}/`)
+    );
+  }
 
   // Handle logging the user out of TuLinkUp.
   async function logout() {
@@ -110,25 +131,42 @@ export function Header() {
   return (
     <header className="sticky top-0 z-50 border-b border-[#e7eaf1] bg-white/95 backdrop-blur">
       {/* Organize the logo, navigation links, and account buttons. */}
-      <div className="page-wrap flex h-[72px] items-center justify-between">
+      <div className="page-wrap flex h-[72px] items-center justify-between gap-4">
         {/* Display the TuLinkUp logo. */}
         <Logo />
 
         {/* Display the main navigation links on larger screens. */}
-        <nav className="hidden items-center gap-8 md:flex">
-          {links.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              className="nav-link"
-            >
-              {link.label}
-            </Link>
-          ))}
+        <nav
+          aria-label="Main navigation"
+          className="hidden items-center gap-4 lg:flex xl:gap-8"
+        >
+          {links.map((link) => {
+            // Determine whether the current link is active.
+            const active = isActiveLink(link.href);
+
+            return (
+              <Link
+                key={link.href}
+                href={link.href}
+                aria-current={
+                  pathname === link.href
+                    ? "page"
+                    : undefined
+                }
+                className={`nav-link whitespace-nowrap ${
+                  active
+                    ? "!font-bold !text-[#26469b]"
+                    : ""
+                }`}
+              >
+                {link.label}
+              </Link>
+            );
+          })}
         </nav>
 
         {/* Display account-related buttons on larger screens. */}
-        <div className="hidden items-center gap-3 md:flex">
+        <div className="hidden shrink-0 items-center gap-3 lg:flex">
           {/* Show dashboard and logout buttons for logged-in users. */}
           {user ? (
             <>
@@ -154,14 +192,14 @@ export function Header() {
               {/* Display login and registration links for visitors. */}
               <Link
                 href="/login"
-                className="nav-link px-2"
+                className="nav-link whitespace-nowrap px-2"
               >
                 Log in
               </Link>
 
               <Link
                 href="/register"
-                className="btn-primary py-2.5"
+                className="btn-primary whitespace-nowrap py-2.5"
               >
                 Get started
               </Link>
@@ -172,10 +210,11 @@ export function Header() {
         {/* Allow mobile users to open or close the navigation menu. */}
         <button
           type="button"
-          className="grid h-10 w-10 place-items-center rounded-xl border border-[#e3e7ef] md:hidden"
-          onClick={() => setOpen(!open)}
+          className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-[#e3e7ef] lg:hidden"
+          onClick={() => setOpen((previous) => !previous)}
           aria-label="Toggle navigation"
           aria-expanded={open}
+          aria-controls="mobile-header-navigation"
         >
           {/* Change the icon depending on whether the menu is open. */}
           <Icon
@@ -187,19 +226,39 @@ export function Header() {
 
       {/* Display the mobile navigation menu when it is open. */}
       {open && (
-        <div className="border-t border-[#e7eaf1] bg-white p-5 md:hidden">
-          <nav className="flex flex-col gap-1">
+        <div
+          id="mobile-header-navigation"
+          className="border-t border-[#e7eaf1] bg-white p-5 lg:hidden"
+        >
+          <nav
+            aria-label="Mobile header navigation"
+            className="flex flex-col gap-1"
+          >
             {/* Display the main navigation links on mobile devices. */}
-            {links.map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                onClick={() => setOpen(false)}
-                className="rounded-xl px-4 py-3 font-semibold text-[#26334f] hover:bg-[#f5f7fb]"
-              >
-                {link.label}
-              </Link>
-            ))}
+            {links.map((link) => {
+              // Determine whether the current link is active.
+              const active = isActiveLink(link.href);
+
+              return (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  onClick={() => setOpen(false)}
+                  aria-current={
+                    pathname === link.href
+                      ? "page"
+                      : undefined
+                  }
+                  className={`rounded-xl px-4 py-3 font-semibold ${
+                    active
+                      ? "bg-[#edf1fa] text-[#26469b]"
+                      : "text-[#26334f] hover:bg-[#f5f7fb]"
+                  }`}
+                >
+                  {link.label}
+                </Link>
+              );
+            })}
 
             {/* Show the dashboard link or login link based on authentication. */}
             <Link
@@ -209,6 +268,27 @@ export function Header() {
             >
               {user ? "Dashboard" : "Log in"}
             </Link>
+
+            {/* Provide quick access to group class management. */}
+            {user?.role === "student" && (
+              <Link
+                href="/dashboard/student/group-classes"
+                onClick={() => setOpen(false)}
+                className="rounded-xl px-4 py-3 font-semibold text-[#26334f] hover:bg-[#f5f7fb]"
+              >
+                My Group Classes
+              </Link>
+            )}
+
+            {user?.role === "tutor" && (
+              <Link
+                href="/dashboard/tutor/group-classes"
+                onClick={() => setOpen(false)}
+                className="rounded-xl px-4 py-3 font-semibold text-[#26334f] hover:bg-[#f5f7fb]"
+              >
+                Manage Group Classes
+              </Link>
+            )}
 
             {/* Show logout for logged-in users or registration for visitors. */}
             {user ? (

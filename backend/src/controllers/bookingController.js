@@ -2,6 +2,13 @@
 // Import the database connection to manage student bookings.
 const pool = require("../config/db");
 
+// Import shared scheduling conflict validation.
+const {
+  lockTutorSchedule,
+  hasGroupClassConflict,
+  getBookingStartTime,
+} = require("../utils/schedulingConflict");
+
 // These are the session lengths students can choose, in minutes.
 const VALID_DURATIONS = [30, 60, 90];
 
@@ -170,6 +177,10 @@ async function createBooking(req, res) {
     // Get the tutor's profile information.
     const tutor = tutorResult.rows[0];
 
+    // Lock the tutor's schedule before checking availability.
+    // This prevents simultaneous conflicting booking and class requests.
+    await lockTutorSchedule(client, tutor.user_id);
+
     // Turn the tutor's subject list into an array.
     const tutorSubjects = String(tutor.subject || "")
       .split(",")
@@ -273,6 +284,42 @@ async function createBooking(req, res) {
       return res.status(409).json({
         error:
           "This tutor already has a booking at that time.",
+      });
+    }
+
+    // Convert the requested booking date and time into
+    // a timezone-aware timestamp for scheduling validation.
+    const bookingStartTime = await getBookingStartTime(
+      client,
+      date,
+      startTime
+    );
+
+    // Prevent students from booking tutoring sessions in the past.
+    if (new Date(bookingStartTime) <= new Date()) {
+      await client.query("ROLLBACK");
+
+      return res.status(400).json({
+        error:
+          "You cannot book a tutoring session in the past.",
+      });
+    }
+
+    // Check whether the tutor has a conflicting group class.
+    const groupConflict = await hasGroupClassConflict(
+      client,
+      tutor.user_id,
+      bookingStartTime,
+      durationMinutes
+    );
+
+    // Prevent one-on-one bookings that overlap with group classes.
+    if (groupConflict) {
+      await client.query("ROLLBACK");
+
+      return res.status(409).json({
+        error:
+          "This tutor has a group class scheduled at that time.",
       });
     }
 

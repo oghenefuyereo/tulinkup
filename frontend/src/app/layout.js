@@ -68,8 +68,13 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     // Set English as the website's main language.
+    // Inform Next.js that smooth scrolling is enabled.
     // Suppress hydration warnings on the root HTML element.
-    <html lang="en" suppressHydrationWarning>
+    <html
+      lang="en"
+      data-scroll-behavior="smooth"
+      suppressHydrationWarning
+    >
       <body className="min-h-screen bg-white text-[#17233d] antialiased">
         {/* Allow keyboard users to skip directly to the main content. */}
         <a
