@@ -1,4 +1,3 @@
-
 // Enable client-side interactions in this component.
 "use client";
 
@@ -11,13 +10,73 @@ import { useRouter } from "next/navigation";
 // Import the icons used in the booking form.
 import { Icon } from "./Icons";
 
+// Define the private tutoring pricing rules.
+const MAX_HOURLY_RATE_CENTS = 2500;
+const VALID_DURATIONS = [30, 60, 90];
+
+// Format Canadian currency.
+function formatCurrency(cents) {
+  return new Intl.NumberFormat("en-CA", {
+    style: "currency",
+    currency: "CAD",
+  }).format(cents / 100);
+}
+
+// Validate the tutor's hourly rate and convert it to cents.
+function getHourlyRateCents(value) {
+  if (
+    value === null ||
+    value === undefined ||
+    !["number", "string"].includes(typeof value) ||
+    String(value).trim() === ""
+  ) {
+    return null;
+  }
+
+  const hourlyRate = Number(value);
+
+  if (
+    !Number.isFinite(hourlyRate) ||
+    hourlyRate < 0 ||
+    hourlyRate > MAX_HOURLY_RATE_CENTS / 100
+  ) {
+    return null;
+  }
+
+  const cents = Math.round(hourlyRate * 100);
+
+  if (
+    Math.abs(hourlyRate * 100 - cents) > 0.000001
+  ) {
+    return null;
+  }
+
+  return cents;
+}
+
+// Calculate the estimated price for the selected duration.
+function calculateSessionPrice(hourlyRateCents, duration) {
+  if (
+    hourlyRateCents === null ||
+    !VALID_DURATIONS.includes(duration)
+  ) {
+    return null;
+  }
+
+  return Math.round(
+    (hourlyRateCents * duration) / 60
+  );
+}
+
 // Format a date into a readable format for students.
 function formatDate(dateString, options) {
   // Return an empty value if no date is provided.
   if (!dateString) return "";
 
   // Create a date object using the selected date.
-  const date = new Date(`${dateString.slice(0, 10)}T12:00:00`);
+  const date = new Date(
+    `${dateString.slice(0, 10)}T12:00:00`
+  );
 
   // Return the original value if the date is invalid.
   if (Number.isNaN(date.getTime())) return dateString;
@@ -26,13 +85,24 @@ function formatDate(dateString, options) {
   return date.toLocaleDateString("en-CA", options);
 }
 
+// Convert a time value into minutes.
+function toMinutes(value) {
+  const [hours, minutes] = String(value)
+    .split(":")
+    .map(Number);
+
+  return hours * 60 + minutes;
+}
+
 // Prepare availability slots in a consistent format.
 function normalizeSlots(slots) {
   return (Array.isArray(slots) ? slots : [])
     // Convert each slot into the format used by the booking form.
     .map((slot) => ({
       id: String(slot.id ?? ""),
-      date: String(slot.date ?? slot.available_date ?? "").slice(0, 10),
+      date: String(
+        slot.date ?? slot.available_date ?? ""
+      ).slice(0, 10),
       startTime: String(
         slot.startTime ?? slot.start_time ?? ""
       ).slice(0, 5),
@@ -89,7 +159,9 @@ export function BookingForm({ tutor, slots = [] }) {
   // Get the unique dates when the tutor is available.
   const dates = useMemo(
     () => [
-      ...new Set(normalizedSlots.map((slot) => slot.date)),
+      ...new Set(
+        normalizedSlots.map((slot) => slot.date)
+      ),
     ],
     [normalizedSlots]
   );
@@ -136,13 +208,56 @@ export function BookingForm({ tutor, slots = [] }) {
       slot.date === selectedDate
   );
 
-  // Get the tutor's hourly teaching rate.
-  const hourlyRate = Number(
-    tutor.hourlyRate ?? tutor.hourly_rate ?? 0
+  // Retrieve and validate the tutor's hourly teaching rate.
+  const hourlyRateCents = getHourlyRateCents(
+    tutor.hourlyRate ?? tutor.hourly_rate
   );
 
-  // Calculate the estimated session cost based on duration.
-  const total = hourlyRate * (Number(duration) / 60);
+  // Convert the selected duration into minutes.
+  const durationMinutes = Number(duration);
+
+  // Calculate the estimated session cost in cents.
+  const totalPriceCents = calculateSessionPrice(
+    hourlyRateCents,
+    durationMinutes
+  );
+
+  // Check whether the tutor has valid pricing information.
+  const hasValidPricing =
+    hourlyRateCents !== null &&
+    totalPriceCents !== null;
+
+  // Identify free sessions and sessions requiring payment.
+  const isFree =
+    hasValidPricing && totalPriceCents === 0;
+
+  const requiresPayment =
+    hasValidPricing && totalPriceCents > 0;
+
+  // Check whether the selected session fits the available time slot.
+  const slotFitsDuration =
+    Boolean(selectedSlot) &&
+    VALID_DURATIONS.includes(durationMinutes) &&
+    toMinutes(selectedSlot.startTime) +
+      durationMinutes <=
+      toMinutes(selectedSlot.endTime);
+
+  // Check whether the student can submit the booking.
+  const canSubmit =
+    !state.loading &&
+    Boolean(selectedSlot) &&
+    Boolean(subjectID) &&
+    hasValidPricing &&
+    slotFitsDuration &&
+    !requiresPayment;
+
+  // Clear previous errors when booking details change.
+  function clearError() {
+    setState((previous) => ({
+      ...previous,
+      error: "",
+    }));
+  }
 
   // Update the selected date and choose its first available time slot.
   function selectDate(date) {
@@ -155,16 +270,13 @@ export function BookingForm({ tutor, slots = [] }) {
 
     // Update the selected time and clear previous errors.
     setSlotID(firstSlot?.id || "");
-    setState((previous) => ({
-      ...previous,
-      error: "",
-    }));
+    clearError();
   }
 
   // Handle the submission of a tutoring session request.
   async function submit() {
     // Prevent another request while a booking is being submitted.
-    if (state.loading) return;
+    if (state.loading || state.success) return;
 
     // Make sure the student has selected an available time.
     if (!selectedSlot) {
@@ -186,21 +298,40 @@ export function BookingForm({ tutor, slots = [] }) {
       return;
     }
 
-    // Convert the selected session duration into minutes.
-    const durationMinutes = Number(duration);
+    // Make sure the student selected a supported duration.
+    if (!VALID_DURATIONS.includes(durationMinutes)) {
+      setState({
+        loading: false,
+        error: "Choose a valid session duration.",
+        success: false,
+      });
+      return;
+    }
 
-    // Convert the start time into minutes for comparison.
-    const startMinutes =
-      Number(selectedSlot.startTime.split(":")[0]) * 60 +
-      Number(selectedSlot.startTime.split(":")[1]);
+    // Prevent bookings when the tutor's pricing is invalid.
+    if (!hasValidPricing) {
+      setState({
+        loading: false,
+        error:
+          "This tutor has not configured a valid hourly rate.",
+        success: false,
+      });
+      return;
+    }
 
-    // Convert the end time into minutes for comparison.
-    const endMinutes =
-      Number(selectedSlot.endTime.split(":")[0]) * 60 +
-      Number(selectedSlot.endTime.split(":")[1]);
+    // Prevent paid bookings until payment integration is available.
+    if (requiresPayment) {
+      setState({
+        loading: false,
+        error:
+          "Paid tutoring bookings are not available yet.",
+        success: false,
+      });
+      return;
+    }
 
     // Make sure the session fits within the tutor's available time.
-    if (startMinutes + durationMinutes > endMinutes) {
+    if (!slotFitsDuration) {
       setState({
         loading: false,
         error:
@@ -219,6 +350,7 @@ export function BookingForm({ tutor, slots = [] }) {
 
     try {
       // Send the booking information to the API.
+      // The backend calculates the final price from the tutor's stored rate.
       const response = await fetch("/api/bookings", {
         method: "POST",
         headers: {
@@ -241,6 +373,12 @@ export function BookingForm({ tutor, slots = [] }) {
           tutor.slug
         )}/book`;
 
+        setState({
+          loading: false,
+          error: "",
+          success: false,
+        });
+
         router.push(
           `/login?next=${encodeURIComponent(nextPath)}`
         );
@@ -251,7 +389,7 @@ export function BookingForm({ tutor, slots = [] }) {
       const data = await response.json().catch(() => ({}));
 
       // Display an error if the booking request fails.
-      if (!response.ok) {
+      if (!response.ok || data.success === false) {
         throw new Error(
           data.error ||
             data.message ||
@@ -299,10 +437,18 @@ export function BookingForm({ tutor, slots = [] }) {
           You can track it from your student dashboard.
         </p>
 
+        {/* Confirm that no payment was required. */}
+        <p className="mt-4 text-sm font-semibold text-green-700">
+          This is a free tutoring session.
+          No payment was required.
+        </p>
+
         {/* Allow students to view their submitted bookings. */}
         <button
           type="button"
-          onClick={() => router.push("/dashboard/student")}
+          onClick={() =>
+            router.push("/dashboard/student")
+          }
           className="btn-primary mt-7"
         >
           View my bookings
@@ -328,6 +474,8 @@ export function BookingForm({ tutor, slots = [] }) {
                 <button
                   type="button"
                   key={item}
+                  disabled={state.loading}
+                  aria-pressed={selectedDate === item}
                   onClick={() => selectDate(item)}
                   className={`rounded-xl border p-3 text-left transition ${
                     selectedDate === item
@@ -372,7 +520,12 @@ export function BookingForm({ tutor, slots = [] }) {
               <button
                 type="button"
                 key={slot.id}
-                onClick={() => setSlotID(slot.id)}
+                disabled={state.loading}
+                aria-pressed={slotID === slot.id}
+                onClick={() => {
+                  setSlotID(slot.id);
+                  clearError();
+                }}
                 className={`rounded-xl border px-4 py-3 text-sm font-bold ${
                   slotID === slot.id
                     ? "border-[#26469b] bg-[#26469b] text-white"
@@ -395,9 +548,11 @@ export function BookingForm({ tutor, slots = [] }) {
             {/* Display the subjects offered by the tutor. */}
             <select
               value={subjectID}
-              onChange={(event) =>
-                setSubjectID(event.target.value)
-              }
+              disabled={state.loading}
+              onChange={(event) => {
+                setSubjectID(event.target.value);
+                clearError();
+              }}
               className="form-input bg-white"
             >
               {subjects.map((subject) => (
@@ -419,17 +574,36 @@ export function BookingForm({ tutor, slots = [] }) {
             {/* Allow students to select the length of the session. */}
             <select
               value={duration}
-              onChange={(event) =>
-                setDuration(event.target.value)
-              }
+              disabled={state.loading}
+              onChange={(event) => {
+                setDuration(event.target.value);
+                clearError();
+              }}
               className="form-input bg-white"
             >
-              <option value="30">30 minutes</option>
-              <option value="60">60 minutes</option>
-              <option value="90">90 minutes</option>
+              {VALID_DURATIONS.map((minutes) => (
+                <option
+                  key={minutes}
+                  value={minutes}
+                >
+                  {minutes} minutes
+                </option>
+              ))}
             </select>
           </label>
         </div>
+
+        {/* Notify students when the selected duration exceeds the slot. */}
+        {selectedSlot && !slotFitsDuration && (
+          <p
+            role="alert"
+            className="mt-4 rounded-xl bg-amber-50 p-3 text-sm font-semibold text-amber-700"
+          >
+            The selected time slot is too short for this
+            session duration. Choose a shorter session
+            or another available time.
+          </p>
+        )}
 
         {/* Allow students to describe what they want to learn. */}
         <label className="mt-6 block">
@@ -443,6 +617,7 @@ export function BookingForm({ tutor, slots = [] }) {
           <textarea
             value={note}
             maxLength={500}
+            disabled={state.loading}
             onChange={(event) =>
               setNote(event.target.value)
             }
@@ -475,10 +650,22 @@ export function BookingForm({ tutor, slots = [] }) {
             value={tutor.name}
           />
 
+          {/* Display the type of tutoring session. */}
+          <Row
+            label="Session type"
+            value="One-on-one tutoring"
+          />
+
           {/* Display the tutor's hourly rate. */}
           <Row
             label="Hourly rate"
-            value={`$${hourlyRate.toFixed(2)}`}
+            value={
+              hourlyRateCents === null
+                ? "Unavailable"
+                : hourlyRateCents === 0
+                  ? "Free"
+                  : `${formatCurrency(hourlyRateCents)}/hr`
+            }
           />
 
           {/* Display the selected session duration. */}
@@ -487,34 +674,114 @@ export function BookingForm({ tutor, slots = [] }) {
             value={`${duration} minutes`}
           />
 
-          {/* Display the estimated session cost. */}
+          {/* Display the number of students allowed. */}
           <Row
-            label="Session estimate"
-            value={`$${total.toFixed(2)}`}
-            strong
+            label="Students"
+            value="1 student"
           />
+
+          {/* Display the selected session date. */}
+          {selectedSlot && (
+            <Row
+              label="Date"
+              value={formatDate(selectedSlot.date, {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              })}
+            />
+          )}
+
+          {/* Display the selected session start time. */}
+          {selectedSlot && (
+            <Row
+              label="Start time"
+              value={selectedSlot.startTime}
+            />
+          )}
+
+          {/* Display the booking currency. */}
+          <Row
+            label="Currency"
+            value="CAD"
+          />
+
+          {/* Display the estimated session cost. */}
+          <div className="border-t border-[#edf0f5] pt-4">
+            <Row
+              label="Session estimate"
+              value={
+                totalPriceCents === null
+                  ? "Unavailable"
+                  : formatCurrency(totalPriceCents)
+              }
+              strong
+            />
+          </div>
+
+          <p className="text-xs leading-5 text-[#748096]">
+            The session price is calculated using the
+            tutor&apos;s hourly rate and the selected
+            duration.
+          </p>
         </div>
 
-        {/* Explain that payments are not collected in the current MVP. */}
-        <div className="mt-6 rounded-xl bg-[#fff8dc] p-4 text-xs leading-5 text-[#725b00]">
-          This MVP submits a booking request only.
-          No payment will be taken.
-        </div>
+        {/* Explain that free sessions do not require payment. */}
+        {isFree && (
+          <div className="mt-6 rounded-xl border border-green-200 bg-green-50 p-4 text-xs leading-5 text-green-700">
+            <p className="font-bold">
+              Free tutoring session
+            </p>
 
-        {/* Submit the booking request when all required options are selected. */}
+            <p className="mt-1">
+              No payment is required. Submit your
+              booking request and wait for the tutor
+              to approve it.
+            </p>
+          </div>
+        )}
+
+        {/* Explain that paid bookings are not available yet. */}
+        {requiresPayment && (
+          <div className="mt-6 rounded-xl bg-[#fff8dc] p-4 text-xs leading-5 text-[#725b00]">
+            <p className="font-bold">
+              Online payments coming soon
+            </p>
+
+            <p className="mt-1">
+              Paid tutoring bookings are temporarily
+              unavailable. You can explore tutors
+              offering free sessions.
+            </p>
+          </div>
+        )}
+
+        {/* Display a warning when the tutor's pricing is unavailable. */}
+        {!hasValidPricing && (
+          <div
+            role="alert"
+            className="mt-6 rounded-xl border border-red-200 bg-red-50 p-4 text-xs leading-5 text-red-700"
+          >
+            This tutor has not configured a valid
+            hourly rate. Booking is currently
+            unavailable.
+          </div>
+        )}
+
+        {/* Submit the booking request when all requirements are satisfied. */}
         <button
           type="button"
           onClick={submit}
-          disabled={
-            state.loading ||
-            !selectedSlot ||
-            !subjectID
-          }
+          disabled={!canSubmit}
           className="btn-primary mt-5 w-full py-4 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {state.loading
             ? "Submitting…"
-            : "Submit booking request"}
+            : !hasValidPricing
+              ? "Booking unavailable"
+              : requiresPayment
+                ? "Paid booking coming soon"
+                : "Submit booking request"}
         </button>
       </aside>
     </div>

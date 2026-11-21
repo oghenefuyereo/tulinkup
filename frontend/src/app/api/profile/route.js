@@ -1,4 +1,3 @@
-
 // Import NextResponse to send responses from the Next.js API.
 import { NextResponse } from "next/server";
 
@@ -7,6 +6,39 @@ import { cookies } from "next/headers";
 
 // Set the Express backend URL for profile requests.
 const API_URL = process.env.API_URL || "http://localhost:5001";
+
+// Define the maximum private tutoring hourly rate.
+const MAX_HOURLY_RATE_CENTS = 2500;
+
+// Validate the tutor's hourly rate and convert it to cents.
+function getHourlyRateCents(value) {
+  if (
+    typeof value !== "string" ||
+    value.trim() === ""
+  ) {
+    return null;
+  }
+
+  const hourlyRate = Number(value);
+
+  if (
+    !Number.isFinite(hourlyRate) ||
+    hourlyRate < 0 ||
+    hourlyRate > MAX_HOURLY_RATE_CENTS / 100
+  ) {
+    return null;
+  }
+
+  const cents = Math.round(hourlyRate * 100);
+
+  if (
+    Math.abs(hourlyRate * 100 - cents) > 0.000001
+  ) {
+    return null;
+  }
+
+  return cents;
+}
 
 // Handle requests to update a student's or tutor's profile.
 export async function POST(request) {
@@ -52,11 +84,33 @@ export async function POST(request) {
       cache: "no-store",
     });
 
-    // Ask the user to sign in again if authentication fails.
+    // Ask the user to sign in again if their session has expired.
+    if (userResponse.status === 401) {
+      return NextResponse.json(
+        {
+          error:
+            "Your session has expired. Please sign in.",
+        },
+        { status: 401 }
+      );
+    }
+
+    // Prevent unauthorized accounts from updating profiles.
+    if (userResponse.status === 403) {
+      return NextResponse.json(
+        { error: "Access denied." },
+        { status: 403 }
+      );
+    }
+
+    // Handle errors returned by the authentication service.
     if (!userResponse.ok) {
       return NextResponse.json(
-        { error: "Your session has expired. Please sign in." },
-        { status: 401 }
+        {
+          error:
+            "Unable to verify your account. Please try again.",
+        },
+        { status: 502 }
       );
     }
 
@@ -88,9 +142,25 @@ export async function POST(request) {
       const qualifications = text("qualifications", 1000);
       const experience = text("experience", 1000);
 
-      // Convert the tutor's hourly rate into a number.
+      // Retrieve and validate the tutor's hourly rate.
       const hourlyRateRaw = form.get("hourlyRate");
-      const hourlyRate = Number(hourlyRateRaw);
+
+      const hourlyRateCents =
+        getHourlyRateCents(hourlyRateRaw);
+
+      // Allow free tutoring and hourly rates up to $25 CAD.
+      if (hourlyRateCents === null) {
+        return NextResponse.json(
+          {
+            error:
+              "Enter a valid hourly rate between $0 and $25 CAD, with no more than two decimal places.",
+          },
+          { status: 400 }
+        );
+      }
+
+      // Convert the validated hourly rate into dollars for the backend.
+      const hourlyRate = hourlyRateCents / 100;
 
       // Create an empty list to store the tutor's selected subjects.
       let subjects = [];
@@ -103,11 +173,16 @@ export async function POST(request) {
 
         // Keep only subjects that contain valid text.
         if (Array.isArray(parsed)) {
-          subjects = parsed.filter(
-            (subject) =>
-              typeof subject === "string" &&
-              subject.trim().length > 0
-          );
+          subjects = parsed
+            .filter(
+              (subject) =>
+                typeof subject === "string" &&
+                subject.trim().length > 0
+            )
+            .map((subject) => subject.trim());
+
+          // Remove duplicate subjects.
+          subjects = [...new Set(subjects)];
         }
       } catch {
         // Use an empty list if the subjects cannot be read.
@@ -115,25 +190,27 @@ export async function POST(request) {
       }
 
       // Make sure the tutor has completed all required profile fields.
-      // The hourly rate must also be between 10 and 500.
       if (
         !title ||
         !location ||
         biography.length < 20 ||
         !qualifications ||
         !experience ||
-        subjects.length < 1 ||
-        hourlyRateRaw === null ||
-        String(hourlyRateRaw).trim() === "" ||
-        !Number.isFinite(hourlyRate) ||
-        hourlyRate < 10 ||
-        hourlyRate > 500
+        subjects.length < 1
       ) {
         return NextResponse.json(
           {
             error:
               "Complete all tutor fields and choose at least one subject.",
           },
+          { status: 400 }
+        );
+      }
+
+      // Make sure the selected subjects fit the database field.
+      if (subjects.join(", ").length > 150) {
+        return NextResponse.json(
+          { error: "Choose valid subjects." },
           { status: 400 }
         );
       }
@@ -182,9 +259,22 @@ export async function POST(request) {
     if (!response.ok) {
       return NextResponse.json(
         {
-          error: result.error || "Unable to update profile.",
+          error:
+            result.error ||
+            result.message ||
+            "Unable to update profile.",
         },
         { status: response.status }
+      );
+    }
+
+    // Verify that the backend successfully updated the profile.
+    if (!result.success) {
+      return NextResponse.json(
+        {
+          error: "Unable to confirm the profile update.",
+        },
+        { status: 502 }
       );
     }
 

@@ -1,4 +1,3 @@
-
 // Enable client-side interactions.
 "use client";
 
@@ -7,6 +6,16 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Icon } from "./Icons";
+
+// Define the payment statuses supported by the platform.
+const paymentLabels = {
+  unpaid: "Unpaid",
+  pending: "Payment pending",
+  paid: "Paid",
+  failed: "Payment failed",
+  refunded: "Refunded",
+  not_required: "Free session",
+};
 
 // Format a booking date into a readable format.
 function formatDate(value) {
@@ -36,6 +45,127 @@ function formatTime(value) {
   return `${parts[0]}:${parts[1]}`;
 }
 
+// Format stored monetary amounts in Canadian dollars.
+function formatCurrency(amountCents) {
+  if (
+    !Number.isSafeInteger(amountCents) ||
+    amountCents < 0
+  ) {
+    return "Unavailable";
+  }
+
+  return new Intl.NumberFormat("en-CA", {
+    style: "currency",
+    currency: "CAD",
+  }).format(amountCents / 100);
+}
+
+// Get the stored pricing information for a booking.
+function getBookingPricing(booking) {
+  return {
+    hourlyRateCents:
+      booking.hourlyRateCents ??
+      booking.hourly_rate_cents ??
+      null,
+
+    totalPriceCents:
+      booking.totalPriceCents ??
+      booking.total_price_cents ??
+      null,
+
+    platformCommissionCents:
+      booking.platformCommissionCents ??
+      booking.platform_commission_cents ??
+      null,
+
+    tutorEarningsCents:
+      booking.tutorEarningsCents ??
+      booking.tutor_earnings_cents ??
+      null,
+
+    currency: booking.currency ?? null,
+
+    paymentStatus:
+      booking.paymentStatus ??
+      booking.payment_status ??
+      null,
+  };
+}
+
+// Check whether the booking has valid stored pricing.
+function hasValidPricing(pricing, duration) {
+  const {
+    hourlyRateCents,
+    totalPriceCents,
+    currency,
+    paymentStatus,
+  } = pricing;
+
+  const durationMinutes = Number(duration);
+
+  if (
+    !Number.isSafeInteger(hourlyRateCents) ||
+    hourlyRateCents < 0 ||
+    hourlyRateCents > 2500 ||
+    !Number.isSafeInteger(totalPriceCents) ||
+    totalPriceCents < 0 ||
+    currency !== "CAD" ||
+    ![30, 60, 90].includes(durationMinutes)
+  ) {
+    return false;
+  }
+
+  // Make sure the stored session price matches the booked duration.
+  const expectedPrice = Math.round(
+    (hourlyRateCents * durationMinutes) / 60
+  );
+
+  if (totalPriceCents !== expectedPrice) {
+    return false;
+  }
+
+  // Make sure the payment status is recognized.
+  if (!Object.hasOwn(paymentLabels, paymentStatus)) {
+    return false;
+  }
+
+  // Free sessions must not require payment.
+  if (totalPriceCents === 0) {
+    return paymentStatus === "not_required";
+  }
+
+  return paymentStatus !== "not_required";
+}
+
+// Check whether the stored revenue breakdown is valid.
+function hasValidRevenueSplit(pricing) {
+  const {
+    totalPriceCents,
+    platformCommissionCents,
+    tutorEarningsCents,
+  } = pricing;
+
+  return (
+    Number.isSafeInteger(platformCommissionCents) &&
+    platformCommissionCents >= 0 &&
+    Number.isSafeInteger(tutorEarningsCents) &&
+    tutorEarningsCents >= 0 &&
+    platformCommissionCents + tutorEarningsCents ===
+      totalPriceCents
+  );
+}
+
+// Check whether the session meets its payment requirement.
+function hasEligiblePayment(pricing, validPricing) {
+  if (!validPricing) return false;
+
+  if (pricing.totalPriceCents === 0) {
+    return pricing.paymentStatus === "not_required";
+  }
+
+  return pricing.paymentStatus === "paid";
+}
+
 // Create the component for managing dashboard bookings.
 export function DashboardBookings({
   bookings = [],
@@ -51,6 +181,72 @@ export function DashboardBookings({
   async function update(id, status) {
     // Prevent multiple requests at the same time.
     if (busy) return;
+
+    // Find the booking being updated.
+    const booking = bookings.find(
+      (item) => String(item.id) === String(id)
+    );
+
+    if (!booking) {
+      setError("Booking not found.");
+      return;
+    }
+
+    // Get the booking's stored pricing and payment information.
+    const pricing = getBookingPricing(booking);
+
+    const duration =
+      booking.duration ??
+      booking.duration_minutes ??
+      60;
+
+    const validPricing = hasValidPricing(
+      pricing,
+      duration
+    );
+
+    const eligiblePayment = hasEligiblePayment(
+      pricing,
+      validPricing
+    );
+
+    // Prevent accepting sessions that do not meet payment requirements.
+    if (
+      status === "accepted" &&
+      !eligiblePayment
+    ) {
+      setError(
+        "This booking cannot be accepted until its payment requirements are satisfied."
+      );
+
+      return;
+    }
+
+    // Prevent completing unpaid or unverified sessions.
+    if (
+      status === "completed" &&
+      !eligiblePayment
+    ) {
+      setError(
+        "This session cannot be completed until its payment requirements are satisfied."
+      );
+
+      return;
+    }
+
+    // Prevent direct cancellation or decline of bookings with active payments.
+    if (
+      ["cancelled", "declined"].includes(status) &&
+      ["paid", "pending"].includes(
+        pricing.paymentStatus
+      )
+    ) {
+      setError(
+        "This booking requires payment or refund review before its status can be changed."
+      );
+
+      return;
+    }
 
     // Track the selected booking and action.
     setBusy(`${id}-${status}`);
@@ -88,16 +284,29 @@ export function DashboardBookings({
             `Unable to update booking (${response.status}).`
         );
 
+        // Refresh because the backend may have processed the request.
+        if (response.status >= 500) {
+          router.refresh();
+        }
+
         return;
       }
 
       // Handle invalid or unexpected responses.
-      if (!data || data.success === false) {
+      if (
+        !data ||
+        data.success !== true ||
+        !data.booking ||
+        String(data.booking.id) !== String(id) ||
+        data.booking.status !== status
+      ) {
         setError(
           data?.error ||
             data?.message ||
-            "The booking service returned an invalid response."
+            "Unable to confirm the booking update. Refresh your dashboard."
         );
+
+        router.refresh();
 
         return;
       }
@@ -109,8 +318,10 @@ export function DashboardBookings({
       console.error("Booking update failed:", err);
 
       setError(
-        "Unable to update booking. Please try again."
+        "Unable to confirm the booking update. Refresh your dashboard before trying again."
       );
+
+      router.refresh();
     } finally {
       // Clear the loading state.
       setBusy("");
@@ -195,6 +406,46 @@ export function DashboardBookings({
           booking.duration_minutes ??
           60;
 
+        // Get the stored pricing information.
+        const pricing = getBookingPricing(booking);
+
+        const validPricing = hasValidPricing(
+          pricing,
+          duration
+        );
+
+        const validRevenueSplit =
+          validPricing &&
+          hasValidRevenueSplit(pricing);
+
+        // Check whether the session meets its payment requirement.
+        const eligiblePayment = hasEligiblePayment(
+          pricing,
+          validPricing
+        );
+
+        // Check whether payment or refund review is required.
+        const requiresPaymentReview = [
+          "paid",
+          "pending",
+        ].includes(pricing.paymentStatus);
+
+        // Check whether the booking is still active.
+        const isActiveBooking = [
+          "pending",
+          "accepted",
+        ].includes(booking.status);
+
+        // Check whether the tutor can accept this booking.
+        const canAccept =
+          booking.status === "pending" &&
+          eligiblePayment;
+
+        // Check whether the tutor can complete this booking.
+        const canComplete =
+          booking.status === "accepted" &&
+          eligiblePayment;
+
         return (
           <article
             key={bookingId}
@@ -220,6 +471,12 @@ export function DashboardBookings({
 
                 {/* Display the current booking status. */}
                 <Status value={booking.status} />
+
+                {/* Display the current payment status. */}
+                <PaymentStatus
+                  value={pricing.paymentStatus}
+                  valid={validPricing}
+                />
               </div>
 
               {/* Display the booked subject. */}
@@ -245,26 +502,175 @@ export function DashboardBookings({
                 {duration} min
               </p>
 
+              {/* Display the original session pricing. */}
+              {validPricing ? (
+                <div className="mt-4 rounded-xl border border-[#e0e5ee] bg-[#f9fafc] p-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-xs text-[#71809a]">
+                        Hourly rate
+                      </p>
+
+                      <p className="mt-1 text-sm font-bold text-[#26334f]">
+                        {formatCurrency(
+                          pricing.hourlyRateCents
+                        )}{" "}
+                        CAD
+                      </p>
+                    </div>
+
+                    <div>
+                      <p className="text-xs text-[#71809a]">
+                        Session price
+                      </p>
+
+                      <p className="mt-1 text-sm font-extrabold text-[#173472]">
+                        {pricing.totalPriceCents === 0
+                          ? "Free"
+                          : `${formatCurrency(
+                              pricing.totalPriceCents
+                            )} CAD`}
+                      </p>
+                    </div>
+
+                    {/* Display the revenue breakdown only to tutors. */}
+                    {role === "tutor" &&
+                      validRevenueSplit && (
+                        <>
+                          <div>
+                            <p className="text-xs text-[#71809a]">
+                              Estimated tutor earnings (80%)
+                            </p>
+
+                            <p className="mt-1 text-sm font-extrabold text-green-700">
+                              {formatCurrency(
+                                pricing.tutorEarningsCents
+                              )}{" "}
+                              CAD
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-xs text-[#71809a]">
+                              Platform commission (20%)
+                            </p>
+
+                            <p className="mt-1 text-sm font-bold text-[#26334f]">
+                              {formatCurrency(
+                                pricing.platformCommissionCents
+                              )}{" "}
+                              CAD
+                            </p>
+                          </div>
+                        </>
+                      )}
+                  </div>
+
+                  {/* Explain that the stored price remains unchanged. */}
+                  <p className="mt-3 text-xs leading-5 text-[#7c879a]">
+                    Pricing is based on the rate stored
+                    when this booking was created.
+                  </p>
+
+                  {/* Explain that estimated earnings are not payouts. */}
+                  {role === "tutor" &&
+                    validRevenueSplit && (
+                      <p className="mt-1 text-xs leading-5 text-[#7c879a]">
+                        Revenue breakdown before applicable
+                        fees and taxes. These amounts do
+                        not represent confirmed earnings
+                        or completed payouts.
+                      </p>
+                    )}
+
+                  {/* Handle unavailable tutor revenue information. */}
+                  {role === "tutor" &&
+                    !validRevenueSplit && (
+                      <p className="mt-2 text-xs text-amber-700">
+                        The revenue breakdown could not be
+                        verified.
+                      </p>
+                    )}
+                </div>
+              ) : (
+                // Keep historical bookings without pricing information.
+                <p className="mt-3 rounded-xl bg-[#fff8dc] p-3 text-xs leading-5 text-[#725b00]">
+                  Pricing information is unavailable or
+                  could not be verified for this booking.
+                </p>
+              )}
+
+              {/* Explain that free sessions do not require payment. */}
+              {validPricing &&
+                pricing.totalPriceCents === 0 &&
+                isActiveBooking && (
+                  <p className="mt-3 text-xs font-semibold text-green-700">
+                    No payment is required for this session.
+                  </p>
+                )}
+
+              {/* Explain that paid bookings require payment verification. */}
+              {validPricing &&
+                pricing.totalPriceCents > 0 &&
+                !eligiblePayment &&
+                isActiveBooking && (
+                  <p className="mt-3 rounded-xl bg-[#fff8dc] p-3 text-xs leading-5 text-[#725b00]">
+                    {requiresPaymentReview
+                      ? "Payment is awaiting verification."
+                      : "This session requires a verified payment. Online payments will become available after payment integration."}
+                  </p>
+                )}
+
+              {/* Display a message when payment has been verified. */}
+              {validPricing &&
+                pricing.paymentStatus === "paid" &&
+                isActiveBooking && (
+                  <p className="mt-3 text-xs font-semibold text-green-700">
+                    Payment verified.
+                  </p>
+                )}
+
+              {/* Display a notice for bookings requiring refund review. */}
+              {requiresPaymentReview &&
+                isActiveBooking && (
+                  <p className="mt-2 text-xs text-[#64748b]">
+                    Payment or refund review is required
+                    before cancelling this booking.
+                  </p>
+                )}
+
+              {/* Display a message for refunded bookings. */}
+              {pricing.paymentStatus === "refunded" && (
+                <p className="mt-3 text-xs text-[#64748b]">
+                  The payment for this booking has been
+                  refunded.
+                </p>
+              )}
+
               {/* Display the live classroom integration notice. */}
               {["tutor", "student"].includes(role) &&
                 booking.status === "accepted" && (
-                  <p className="mt-2 text-xs text-[#64748b]">
-                    Live session access will become
-                    available after video integration.
+                  <p className="mt-3 text-xs text-[#64748b]">
+                    {eligiblePayment
+                      ? "Live classroom access is currently unavailable from this dashboard."
+                      : "Live session access requires valid pricing and payment verification."}
                   </p>
                 )}
             </div>
 
             {/* Display actions based on role and status. */}
             <div className="flex flex-wrap gap-2">
-
               {/* Allow tutors to start an accepted live session. */}
               {role === "tutor" &&
                 booking.status === "accepted" && (
                   <button
                     type="button"
                     disabled
-                    title="Live classroom integration is pending"
+                    title={
+                      eligiblePayment
+                        ? "Live classroom access is currently unavailable"
+                        : "Payment verification is required"
+                    }
                     className="cursor-not-allowed rounded-xl bg-[#26469b] px-4 py-2.5 text-sm font-bold text-white opacity-50"
                   >
                     Start Live Session
@@ -277,7 +683,11 @@ export function DashboardBookings({
                   <button
                     type="button"
                     disabled
-                    title="Live classroom integration is pending"
+                    title={
+                      eligiblePayment
+                        ? "Live classroom access is currently unavailable"
+                        : "Payment verification is required"
+                    }
                     className="cursor-not-allowed rounded-xl bg-[#26469b] px-4 py-2.5 text-sm font-bold text-white opacity-50"
                   >
                     Join Live Session
@@ -288,28 +698,43 @@ export function DashboardBookings({
               {role === "tutor" &&
                 booking.status === "pending" && (
                   <>
-                    {/* Accept booking. */}
+                    {/* Accept bookings that meet payment requirements. */}
                     <button
                       type="button"
-                      disabled={Boolean(busy)}
+                      disabled={
+                        Boolean(busy) || !canAccept
+                      }
+                      title={
+                        canAccept
+                          ? "Accept booking"
+                          : "Valid pricing and payment verification are required"
+                      }
                       onClick={() =>
                         update(bookingId, "accepted")
                       }
-                      className="btn-primary px-4 py-2.5 disabled:opacity-50"
+                      className="btn-primary px-4 py-2.5 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {busy === `${bookingId}-accepted`
                         ? "Accepting..."
                         : "Accept"}
                     </button>
 
-                    {/* Decline booking. */}
+                    {/* Decline bookings without active payments. */}
                     <button
                       type="button"
-                      disabled={Boolean(busy)}
+                      disabled={
+                        Boolean(busy) ||
+                        requiresPaymentReview
+                      }
+                      title={
+                        requiresPaymentReview
+                          ? "Payment or refund review is required"
+                          : "Decline booking"
+                      }
                       onClick={() =>
                         update(bookingId, "declined")
                       }
-                      className="btn-secondary px-4 py-2.5 disabled:opacity-50"
+                      className="btn-secondary px-4 py-2.5 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {busy === `${bookingId}-declined`
                         ? "Declining..."
@@ -318,16 +743,23 @@ export function DashboardBookings({
                   </>
                 )}
 
-              {/* Allow tutors to complete accepted bookings. */}
+              {/* Allow tutors to complete eligible accepted bookings. */}
               {role === "tutor" &&
                 booking.status === "accepted" && (
                   <button
                     type="button"
-                    disabled={Boolean(busy)}
+                    disabled={
+                      Boolean(busy) || !canComplete
+                    }
+                    title={
+                      canComplete
+                        ? "Mark session as completed"
+                        : "Payment verification is required"
+                    }
                     onClick={() =>
                       update(bookingId, "completed")
                     }
-                    className="btn-primary px-4 py-2.5 disabled:opacity-50"
+                    className="btn-primary px-4 py-2.5 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {busy === `${bookingId}-completed`
                       ? "Updating..."
@@ -335,18 +767,26 @@ export function DashboardBookings({
                   </button>
                 )}
 
-              {/* Allow students to cancel their bookings. */}
+              {/* Allow students to cancel eligible bookings. */}
               {role === "student" &&
                 ["pending", "accepted"].includes(
                   booking.status
                 ) && (
                   <button
                     type="button"
-                    disabled={Boolean(busy)}
+                    disabled={
+                      Boolean(busy) ||
+                      requiresPaymentReview
+                    }
+                    title={
+                      requiresPaymentReview
+                        ? "Payment or refund review is required"
+                        : "Cancel booking"
+                    }
                     onClick={() =>
                       update(bookingId, "cancelled")
                     }
-                    className="btn-secondary px-4 py-2.5 disabled:opacity-50"
+                    className="btn-secondary px-4 py-2.5 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {busy === `${bookingId}-cancelled`
                       ? "Cancelling..."
@@ -390,6 +830,35 @@ function Status({ value }) {
       className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wide ${color}`}
     >
       {value}
+    </span>
+  );
+}
+
+// Create a reusable payment status badge.
+function PaymentStatus({ value, valid }) {
+  // Select the badge colour based on the payment status.
+  const color = !valid
+    ? "bg-slate-100 text-slate-600"
+    : value === "paid" ||
+        value === "not_required"
+      ? "bg-green-50 text-green-700"
+      : value === "pending" ||
+          value === "unpaid"
+        ? "bg-amber-50 text-amber-700"
+        : value === "failed"
+          ? "bg-red-50 text-red-700"
+          : value === "refunded"
+            ? "bg-blue-50 text-blue-700"
+            : "bg-slate-100 text-slate-600";
+
+  // Display the payment status separately from the booking status.
+  return (
+    <span
+      className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wide ${color}`}
+    >
+      {valid
+        ? paymentLabels[value] || "Payment unavailable"
+        : "Payment unavailable"}
     </span>
   );
 }

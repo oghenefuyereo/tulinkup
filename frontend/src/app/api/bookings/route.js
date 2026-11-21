@@ -1,4 +1,3 @@
-
 // Import NextResponse to send responses from the Next.js API.
 import { NextResponse } from "next/server";
 
@@ -13,7 +12,10 @@ const API_URL =
   process.env.API_URL || "http://localhost:5001";
 
 // Define the session durations that students can select.
-const allowedDurations = new Set(["30", "60", "90"]);
+const allowedDurations = new Set([30, 60, 90]);
+
+// Define the platform's maximum private tutoring hourly rate.
+const MAX_HOURLY_RATE_CENTS = 2500;
 
 // Check whether the selected booking date is valid.
 function validDate(value) {
@@ -64,10 +66,86 @@ async function readJSON(response) {
   }
 }
 
+// Verify the pricing information returned by the backend.
+function hasValidBookingPricing(booking) {
+  if (
+    !booking ||
+    typeof booking !== "object"
+  ) {
+    return false;
+  }
+
+  // Get the pricing information stored in the booking.
+  const {
+    hourly_rate_cents,
+    total_price_cents,
+    platform_commission_cents,
+    tutor_earnings_cents,
+    currency,
+    payment_status,
+  } = booking;
+
+  // Make sure all monetary values are valid Canadian cents.
+  const amounts = [
+    hourly_rate_cents,
+    total_price_cents,
+    platform_commission_cents,
+    tutor_earnings_cents,
+  ];
+
+  if (
+    amounts.some(
+      (amount) =>
+        !Number.isSafeInteger(amount) ||
+        amount < 0
+    )
+  ) {
+    return false;
+  }
+
+  // Make sure the hourly rate follows the platform pricing limit.
+  if (
+    hourly_rate_cents > MAX_HOURLY_RATE_CENTS ||
+    currency !== "CAD"
+  ) {
+    return false;
+  }
+
+  // Make sure the revenue allocation matches the session price.
+  if (
+    platform_commission_cents +
+      tutor_earnings_cents !==
+    total_price_cents
+  ) {
+    return false;
+  }
+
+  // Verify that the booking has a supported payment status.
+  if (
+    ![
+      "not_required",
+      "unpaid",
+      "pending",
+      "paid",
+      "failed",
+      "refunded",
+    ].includes(payment_status)
+  ) {
+    return false;
+  }
+
+  // Free bookings must not require payment.
+  if (total_price_cents === 0) {
+    return payment_status === "not_required";
+  }
+
+  // Paid bookings must have a payment-related status.
+  return payment_status !== "not_required";
+}
+
 // Handle requests from students who want to book tutoring sessions.
 export async function POST(request) {
   try {
-    // 1. Retrieve authentication token.
     // Read the user's login token from the stored cookie.
     const cookieStore = await cookies();
     const token = cookieStore.get("tulinkup_token")?.value;
@@ -80,7 +158,6 @@ export async function POST(request) {
       );
     }
 
-    // 2. Verify authentication through Express.
     // Send the token to the backend to confirm the user's identity.
     const authResponse = await fetch(
       `${API_URL}/api/auth/me`,
@@ -89,6 +166,7 @@ export async function POST(request) {
           Authorization: `Bearer ${token}`,
         },
         cache: "no-store",
+        signal: AbortSignal.timeout(30000),
       }
     );
 
@@ -103,6 +181,14 @@ export async function POST(request) {
             "Your session has expired. Please log in again.",
         },
         { status: 401 }
+      );
+    }
+
+    // Prevent unauthorized users from requesting bookings.
+    if (authResponse.status === 403) {
+      return NextResponse.json(
+        { error: "Access denied." },
+        { status: 403 }
       );
     }
 
@@ -136,7 +222,6 @@ export async function POST(request) {
       );
     }
 
-    // 3. Read booking form data.
     // Try to read the session details submitted by the student.
     let body;
 
@@ -150,51 +235,61 @@ export async function POST(request) {
       );
     }
 
+    // Make sure the submitted booking data is an object.
+    if (
+      !body ||
+      typeof body !== "object" ||
+      Array.isArray(body)
+    ) {
+      return NextResponse.json(
+        { error: "Invalid booking request." },
+        { status: 400 }
+      );
+    }
+
     // Get the ID of the tutor selected by the student.
     const tutorID = String(
-      body?.tutorID ?? ""
+      body.tutorID ?? ""
     ).trim();
 
     // Get the selected availability slot ID.
     const slotID = String(
-      body?.slotID ?? ""
+      body.slotID ?? ""
     ).trim();
 
     // Get the subject the student wants to study.
-    const subjectID = String(
-      body?.subjectID ?? ""
-    ).trim();
+    const subjectID =
+      typeof body.subjectID === "string"
+        ? body.subjectID.trim()
+        : "";
 
     // Get the selected date for the tutoring session.
     const date = String(
-      body?.date ?? ""
+      body.date ?? ""
     ).trim();
 
     // Get the selected starting time for the session.
     const startTime = String(
-      body?.startTime ?? ""
+      body.startTime ?? ""
     ).trim();
 
-    // Get the length of the tutoring session.
-    const duration = String(
-      body?.duration ?? ""
-    ).trim();
+    // Convert the session duration into minutes.
+    const duration = Number(body.duration);
 
-    // Get the student's optional note and limit it to 500 characters.
-    const note =
-      typeof body?.note === "string"
-        ? body.note.trim().slice(0, 500)
-        : "";
+    // Get the student's optional learning note.
+    const note = body.note ?? "";
 
-    // 4. Validate booking details.
     // Make sure all required booking information is provided correctly.
     if (
-      !/^\d+$/.test(tutorID) ||
-      !/^\d+$/.test(slotID) ||
+      !/^[1-9]\d*$/.test(tutorID) ||
+      !/^[1-9]\d*$/.test(slotID) ||
       !subjectID ||
+      subjectID.length > 150 ||
       !validDate(date) ||
       !validTime(startTime) ||
-      !allowedDurations.has(duration)
+      !allowedDurations.has(duration) ||
+      typeof note !== "string" ||
+      note.length > 500
     ) {
       return NextResponse.json(
         {
@@ -205,8 +300,8 @@ export async function POST(request) {
       );
     }
 
-    // 5. Forward validated request to Express.
-    // Send the booking details and authentication token to the backend.
+    // Send only the validated booking details to the backend.
+    // The backend retrieves the tutor's rate and calculates the price.
     const response = await fetch(
       `${API_URL}/api/bookings`,
       {
@@ -222,16 +317,16 @@ export async function POST(request) {
           date,
           startTime,
           duration,
-          note,
+          note: note.trim(),
         }),
         cache: "no-store",
+        signal: AbortSignal.timeout(30000),
       }
     );
 
     // Read the booking response returned by the backend.
     const data = await readJSON(response);
 
-    // 6. Handle backend errors.
     // Return an appropriate error if the booking cannot be created.
     if (!response.ok) {
       return NextResponse.json(
@@ -245,19 +340,39 @@ export async function POST(request) {
       );
     }
 
-    // Handle cases where the backend returns an invalid response.
-    if (!data) {
+    // Make sure the backend confirmed that the booking was created.
+    if (
+      !data ||
+      data.success !== true ||
+      !data.booking ||
+      !data.booking.id
+    ) {
       return NextResponse.json(
         {
           error:
-            "Booking service returned an invalid response.",
+            "Unable to confirm your booking. Check your student dashboard before submitting another request.",
         },
         { status: 502 }
       );
     }
 
-    // 7. Return successful booking.
-    // Send the successful booking information back to the frontend.
+    // Verify the pricing information returned by the backend.
+    if (!hasValidBookingPricing(data.booking)) {
+      console.error(
+        "Invalid pricing returned for booking:",
+        data.booking.id
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            "Your booking was submitted, but its pricing information could not be verified. Check your student dashboard before submitting another request.",
+        },
+        { status: 502 }
+      );
+    }
+
+    // Return the booking and its stored pricing information.
     return NextResponse.json(data, {
       status: response.status,
     });
@@ -265,11 +380,25 @@ export async function POST(request) {
     // Log any unexpected errors during the booking process.
     console.error("Booking API error:", error);
 
+    // Handle requests that take too long to complete.
+    if (
+      error.name === "TimeoutError" ||
+      error.name === "AbortError"
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "The booking service took too long to respond. Check your student dashboard before submitting another request.",
+        },
+        { status: 504 }
+      );
+    }
+
     // Return an error if the booking service is unavailable.
     return NextResponse.json(
       {
         error:
-          "Booking service is temporarily unavailable. Please try again.",
+          "Booking service is temporarily unavailable. Check your dashboard before trying again.",
       },
       { status: 503 }
     );

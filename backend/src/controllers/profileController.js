@@ -1,6 +1,42 @@
-
 // Import the database connection to update student and tutor profiles.
 const pool = require("../config/db");
+
+// Import the platform pricing rules.
+const {
+  getPricingConfig,
+  validatePrivatePricing,
+} = require("../utils/pricing");
+
+// Validate the tutor's hourly rate and convert it to cents.
+function validateHourlyRate(hourlyRate, pricing) {
+  if (
+    typeof hourlyRate !== "number" ||
+    !Number.isFinite(hourlyRate) ||
+    hourlyRate < 0
+  ) {
+    throw new Error("Enter a valid hourly rate.");
+  }
+
+  const hourlyRateCents = Math.round(hourlyRate * 100);
+
+  if (
+    Math.abs(hourlyRate * 100 - hourlyRateCents) > 0.000001
+  ) {
+    throw new Error(
+      "The hourly rate must have no more than two decimal places."
+    );
+  }
+
+  try {
+    validatePrivatePricing(hourlyRateCents, pricing);
+  } catch {
+    throw new Error(
+      `The hourly rate must be between $${pricing.MIN_PRIVATE_HOURLY_RATE_CENTS / 100} and $${pricing.MAX_PRIVATE_HOURLY_RATE_CENTS / 100} ${pricing.CURRENCY}.`
+    );
+  }
+
+  return hourlyRateCents;
+}
 
 // Allow logged-in students and tutors to update their profile information.
 async function updateProfile(req, res) {
@@ -41,8 +77,9 @@ async function updateProfile(req, res) {
     });
   }
 
-  // Create an empty list to store the tutor's selected subjects.
+  // Store the validated subjects and hourly rate.
   let normalizedSubjects = [];
+  let hourlyRateCents = null;
 
   // Tutors need to provide additional information about their services.
   if (role === "tutor") {
@@ -64,11 +101,7 @@ async function updateProfile(req, res) {
       !experience.trim() ||
       experience.length > 1000 ||
       !Array.isArray(subjects) ||
-      subjects.length < 1 ||
-      typeof hourlyRate !== "number" ||
-      !Number.isFinite(hourlyRate) ||
-      hourlyRate < 10 ||
-      hourlyRate > 500
+      subjects.length < 1
     ) {
       return res.status(400).json({
         error:
@@ -85,6 +118,11 @@ async function updateProfile(req, res) {
       )
       .map((subject) => subject.trim());
 
+    // Remove duplicate subjects.
+    normalizedSubjects = [
+      ...new Set(normalizedSubjects),
+    ];
+
     // Make sure the tutor has selected at least one valid subject.
     if (
       normalizedSubjects.length === 0 ||
@@ -96,12 +134,32 @@ async function updateProfile(req, res) {
     }
   }
 
-  // Get a database connection to save the profile changes.
-  const client = await pool.connect();
+  let client;
 
   try {
+    // Get a database connection to save the profile changes.
+    client = await pool.connect();
+
     // Start a transaction so the profile updates are saved together.
     await client.query("BEGIN");
+
+    // Retrieve the current pricing rules and validate the tutor's hourly rate.
+    if (role === "tutor") {
+      const pricing = await getPricingConfig(client);
+
+      try {
+        hourlyRateCents = validateHourlyRate(
+          hourlyRate,
+          pricing
+        );
+      } catch (error) {
+        await client.query("ROLLBACK");
+
+        return res.status(400).json({
+          error: error.message,
+        });
+      }
+    }
 
     // Update the user's name and phone number in the users table.
     const updatedUser = await client.query(
@@ -152,7 +210,7 @@ async function updateProfile(req, res) {
           biography.trim(),
           qualifications.trim(),
           experience.trim(),
-          hourlyRate,
+          (hourlyRateCents / 100).toFixed(2),
           normalizedSubjects.join(", "),
         ]
       );
@@ -169,7 +227,16 @@ async function updateProfile(req, res) {
     });
   } catch (error) {
     // Undo the changes if an error happens during the update.
-    await client.query("ROLLBACK");
+    if (client) {
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackError) {
+        console.error(
+          "Profile rollback error:",
+          rollbackError
+        );
+      }
+    }
 
     // Log the error to help identify what went wrong.
     console.error("Profile update error:", error);
@@ -179,7 +246,9 @@ async function updateProfile(req, res) {
     });
   } finally {
     // Release the database connection after the request is finished.
-    client.release();
+    if (client) {
+      client.release();
+    }
   }
 }
 

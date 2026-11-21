@@ -1,10 +1,86 @@
-
 // Import the database connection to manage tutor profiles.
 const pool = require("../config/db");
+
+// Import the platform pricing configuration.
+const {
+  getPricingConfig,
+  validatePrivatePricing,
+} = require("../utils/pricing");
+
+// Validate and convert an hourly rate into cents.
+function getHourlyRateCents(value, pricing) {
+  if (
+    value == null ||
+    !["number", "string"].includes(typeof value) ||
+    String(value).trim() === ""
+  ) {
+    return null;
+  }
+
+  const rate = Number(value);
+
+  if (
+    !Number.isFinite(rate) ||
+    rate < pricing.MIN_PRIVATE_HOURLY_RATE_CENTS / 100 ||
+    rate > pricing.MAX_PRIVATE_HOURLY_RATE_CENTS / 100
+  ) {
+    return null;
+  }
+
+  const cents = Math.round(rate * 100);
+
+  if (Math.abs(rate * 100 - cents) > 0.000001) {
+    return null;
+  }
+
+  try {
+    validatePrivatePricing(cents, pricing);
+
+    return cents;
+  } catch {
+    return null;
+  }
+}
+
+// Prepare the hourly rate validation message.
+function getHourlyRateError(pricing) {
+  const minimum =
+    pricing.MIN_PRIVATE_HOURLY_RATE_CENTS / 100;
+
+  const maximum =
+    pricing.MAX_PRIVATE_HOURLY_RATE_CENTS / 100;
+
+  return `Hourly rate must be between $${minimum} and $${maximum} ${pricing.CURRENCY} with a maximum of two decimal places.`;
+}
+
+// Prepare tutor pricing information for the frontend.
+function formatTutorPricing(tutor, pricing) {
+  const hourlyRateCents = getHourlyRateCents(
+    tutor.hourly_rate,
+    pricing
+  );
+
+  const hourlyRate =
+    hourlyRateCents === null
+      ? null
+      : hourlyRateCents / 100;
+
+  return {
+    ...tutor,
+    hourly_rate: hourlyRate,
+    hourlyRate,
+    hourlyRateCents,
+    currency: pricing.CURRENCY,
+    isFree: hourlyRateCents === 0,
+  };
+}
 
 // Get all tutor profiles, including the subjects they teach.
 const getTutorProfiles = async (req, res) => {
   try {
+    // Retrieve the current platform pricing rules.
+    const pricing = await getPricingConfig();
+
     // Get tutor details and combine each tutor's subjects into a list.
     const result = await pool.query(`
       SELECT
@@ -42,15 +118,24 @@ const getTutorProfiles = async (req, res) => {
       ORDER BY tp.featured DESC, tp.rating DESC, tp.id DESC
     `);
 
+    // Format the pricing information for each tutor.
+    const tutors = result.rows.map((tutor) =>
+      formatTutorPricing(tutor, pricing)
+    );
+
     // Send the tutor profiles back to the frontend.
-    res.json({
+    return res.json({
       success: true,
-      tutors: result.rows,
+      tutors,
     });
   } catch (error) {
     // Log any errors that happen while loading tutor profiles.
-    console.error("Get tutor profiles error:", error.message);
-    res.status(500).json({
+    console.error(
+      "Get tutor profiles error:",
+      error.message
+    );
+
+    return res.status(500).json({
       success: false,
       message: "Unable to load tutor profiles",
     });
@@ -76,15 +161,28 @@ const getTutorProfileBySlug = async (req, res) => {
       });
     }
 
+    // Retrieve the current platform pricing rules.
+    const pricing = await getPricingConfig();
+
+    // Prepare the tutor's profile and pricing information.
+    const tutor = formatTutorPricing(
+      result.rows[0],
+      pricing
+    );
+
     // Send the tutor's profile information to the frontend.
-    res.json({
+    return res.json({
       success: true,
-      tutor: result.rows[0],
+      tutor,
     });
   } catch (error) {
     // Log any errors that happen while retrieving the tutor profile.
-    console.error("Get tutor profile error:", error.message);
-    res.status(500).json({
+    console.error(
+      "Get tutor profile error:",
+      error.message
+    );
+
+    return res.status(500).json({
       success: false,
       message: "Unable to load tutor profile",
     });
@@ -93,12 +191,15 @@ const getTutorProfileBySlug = async (req, res) => {
 
 // Allow a tutor to create a profile with their professional details.
 const createTutorProfile = async (req, res) => {
-  // Get a database connection to save the profile and its subjects.
-  const client = await pool.connect();
+  let client;
+  let transactionStarted = false;
 
   try {
     // Only registered tutors can create tutor profiles.
-    if (req.user.role !== "tutor") {
+    if (
+      !req.user?.userId ||
+      req.user?.role !== "tutor"
+    ) {
       return res.status(403).json({
         success: false,
         message: "Only tutors can create tutor profiles",
@@ -116,21 +217,25 @@ const createTutorProfile = async (req, res) => {
       experience,
       hourlyRate,
       subjectIds,
-    } = req.body;
+    } = req.body || {};
 
-    // Make sure all required fields are completed correctly.
-    // Tutors must also choose at least one subject and a valid hourly rate.
+    // Make sure all required profile fields are completed.
+    const requiredFields = [
+      displayName,
+      slug,
+      title,
+      location,
+      biography,
+      qualifications,
+      experience,
+    ];
+
     if (
-      !displayName?.trim() ||
-      !slug?.trim() ||
-      !title?.trim() ||
-      !location?.trim() ||
-      !biography?.trim() ||
-      !qualifications?.trim() ||
-      !experience?.trim() ||
-      !Number.isFinite(Number(hourlyRate)) ||
-      Number(hourlyRate) < 10 ||
-      Number(hourlyRate) > 500 ||
+      requiredFields.some(
+        (value) =>
+          typeof value !== "string" ||
+          !value.trim()
+      ) ||
       !Array.isArray(subjectIds) ||
       subjectIds.length === 0
     ) {
@@ -140,8 +245,36 @@ const createTutorProfile = async (req, res) => {
       });
     }
 
+    // Get a database connection to save the profile and its subjects.
+    client = await pool.connect();
+
     // Start a transaction so the profile and subjects are saved together.
     await client.query("BEGIN");
+    transactionStarted = true;
+
+    // Retrieve the current platform pricing rules.
+    const pricing = await getPricingConfig(client);
+
+    // Validate the tutor's hourly rate.
+    const hourlyRateCents = getHourlyRateCents(
+      hourlyRate,
+      pricing
+    );
+
+    if (hourlyRateCents === null) {
+      await client.query("ROLLBACK");
+      transactionStarted = false;
+
+      return res.status(400).json({
+        success: false,
+        message: getHourlyRateError(pricing),
+      });
+    }
+
+    // Convert the validated amount into dollars for the database.
+    const normalizedHourlyRate = (
+      hourlyRateCents / 100
+    ).toFixed(2);
 
     // Save the tutor's main profile information in the database.
     const result = await client.query(
@@ -167,7 +300,7 @@ const createTutorProfile = async (req, res) => {
         biography.trim(),
         qualifications.trim(),
         experience.trim(),
-        Number(hourlyRate),
+        normalizedHourlyRate,
       ]
     );
 
@@ -186,19 +319,35 @@ const createTutorProfile = async (req, res) => {
 
     // Save the transaction once the profile and subjects are added.
     await client.query("COMMIT");
+    transactionStarted = false;
 
     // Confirm that the tutor profile was created successfully.
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
-      tutor,
+      tutor: formatTutorPricing(tutor, pricing),
     });
   } catch (error) {
     // Undo the changes if something goes wrong.
-    await client.query("ROLLBACK");
-    console.error("Create tutor profile error:", error.message);
+    if (client && transactionStarted) {
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackError) {
+        console.error(
+          "Tutor profile rollback error:",
+          rollbackError.message
+        );
+      }
+    }
+
+    console.error(
+      "Create tutor profile error:",
+      error.message
+    );
 
     // Return a specific message if the profile or slug already exists.
-    res.status(error.code === "23505" ? 409 : 500).json({
+    return res.status(
+      error.code === "23505" ? 409 : 500
+    ).json({
       success: false,
       message:
         error.code === "23505"
@@ -207,15 +356,23 @@ const createTutorProfile = async (req, res) => {
     });
   } finally {
     // Release the database connection after the request is finished.
-    client.release();
+    if (client) {
+      client.release();
+    }
   }
 };
 
 // Allow tutors to update their existing profile information.
 const updateTutorProfile = async (req, res) => {
+  let client;
+  let transactionStarted = false;
+
   try {
     // Only tutors are allowed to update tutor profiles.
-    if (req.user.role !== "tutor") {
+    if (
+      !req.user?.userId ||
+      req.user?.role !== "tutor"
+    ) {
       return res.status(403).json({
         success: false,
         message: "Only tutors can update tutor profiles",
@@ -232,11 +389,64 @@ const updateTutorProfile = async (req, res) => {
       experience,
       hourlyRate,
       availabilityStatus,
-    } = req.body;
+    } = req.body || {};
+
+    // Validate the tutor's availability status when provided.
+    const allowedAvailabilityStatuses = [
+      "available",
+      "appointment",
+      "unavailable",
+    ];
+
+    if (
+      availabilityStatus != null &&
+      !allowedAvailabilityStatuses.includes(
+        availabilityStatus
+      )
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid tutor availability status",
+      });
+    }
+
+    // Get a database connection to update the tutor profile.
+    client = await pool.connect();
+
+    // Start a transaction for the profile update.
+    await client.query("BEGIN");
+    transactionStarted = true;
+
+    // Retrieve the current platform pricing rules.
+    const pricing = await getPricingConfig(client);
+
+    // Validate the new hourly rate when one is provided.
+    let normalizedHourlyRate = null;
+
+    if (hourlyRate !== undefined) {
+      const hourlyRateCents = getHourlyRateCents(
+        hourlyRate,
+        pricing
+      );
+
+      if (hourlyRateCents === null) {
+        await client.query("ROLLBACK");
+        transactionStarted = false;
+
+        return res.status(400).json({
+          success: false,
+          message: getHourlyRateError(pricing),
+        });
+      }
+
+      normalizedHourlyRate = (
+        hourlyRateCents / 100
+      ).toFixed(2);
+    }
 
     // Update only the fields that have been provided.
     // Keep the existing values for fields that are not being changed.
-    const result = await pool.query(
+    const result = await client.query(
       `UPDATE public.tutor_profiles
        SET display_name = COALESCE($1, display_name),
            title = COALESCE($2, title),
@@ -255,7 +465,7 @@ const updateTutorProfile = async (req, res) => {
         biography ?? null,
         qualifications ?? null,
         experience ?? null,
-        hourlyRate ?? null,
+        normalizedHourlyRate,
         availabilityStatus ?? null,
         req.params.id,
         req.user.userId,
@@ -264,24 +474,55 @@ const updateTutorProfile = async (req, res) => {
 
     // Return an error if the profile does not exist or belongs to another tutor.
     if (!result.rows.length) {
+      await client.query("ROLLBACK");
+      transactionStarted = false;
+
       return res.status(404).json({
         success: false,
         message: "Tutor profile not found or access denied",
       });
     }
 
+    // Save the tutor profile changes.
+    await client.query("COMMIT");
+    transactionStarted = false;
+
     // Send the updated tutor profile back to the frontend.
-    res.json({
+    return res.json({
       success: true,
-      tutor: result.rows[0],
+      tutor: formatTutorPricing(
+        result.rows[0],
+        pricing
+      ),
     });
   } catch (error) {
+    // Undo the changes if something goes wrong.
+    if (client && transactionStarted) {
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackError) {
+        console.error(
+          "Tutor profile rollback error:",
+          rollbackError.message
+        );
+      }
+    }
+
     // Log any errors that happen while updating the profile.
-    console.error("Update tutor profile error:", error.message);
-    res.status(500).json({
+    console.error(
+      "Update tutor profile error:",
+      error.message
+    );
+
+    return res.status(500).json({
       success: false,
       message: "Unable to update tutor profile",
     });
+  } finally {
+    // Release the database connection after the request is finished.
+    if (client) {
+      client.release();
+    }
   }
 };
 
@@ -289,7 +530,10 @@ const updateTutorProfile = async (req, res) => {
 const deleteTutorProfile = async (req, res) => {
   try {
     // Make sure the logged-in user is a tutor.
-    if (req.user.role !== "tutor") {
+    if (
+      !req.user?.userId ||
+      req.user?.role !== "tutor"
+    ) {
       return res.status(403).json({
         success: false,
         message: "Only tutors can delete tutor profiles",
@@ -313,14 +557,18 @@ const deleteTutorProfile = async (req, res) => {
     }
 
     // Confirm that the tutor profile was deleted successfully.
-    res.json({
+    return res.json({
       success: true,
       message: "Tutor profile deleted successfully",
     });
   } catch (error) {
-    // Log any errors that happen while deleting the profile.
-    console.error("Delete tutor profile error:", error.message);
-    res.status(500).json({
+    // Log any errors that happen while deleting the tutor profile.
+    console.error(
+      "Delete tutor profile error:",
+      error.message
+    );
+
+    return res.status(500).json({
       success: false,
       message: "Unable to delete tutor profile",
     });

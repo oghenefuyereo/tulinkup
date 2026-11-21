@@ -1,4 +1,3 @@
-
 // Enable client-side interactions in this component.
 "use client";
 
@@ -10,6 +9,94 @@ import { Icon } from "./Icons";
 
 // Import TutorCard to display each tutor's information.
 import { TutorCard } from "./TutorCard";
+
+// Define the maximum hourly teaching rate in cents.
+const MAX_HOURLY_RATE_CENTS = 2500;
+
+// Define the available hourly price filters.
+const priceRanges = {
+  "Free tutoring": [0, 0],
+  "$0.01–$5": [1, 500],
+  "Over $5–$10": [501, 1000],
+  "Over $10–$15": [1001, 1500],
+  "Over $15–$20": [1501, 2000],
+  "Over $20–$25": [2001, 2500],
+};
+
+// Validate and convert the tutor's hourly rate into cents.
+function getHourlyRateCents(value) {
+  if (
+    value == null ||
+    !["number", "string"].includes(typeof value) ||
+    String(value).trim() === ""
+  ) {
+    return null;
+  }
+
+  const rate = Number(value);
+
+  if (
+    !Number.isFinite(rate) ||
+    rate < 0 ||
+    rate > MAX_HOURLY_RATE_CENTS / 100
+  ) {
+    return null;
+  }
+
+  const cents = Math.round(rate * 100);
+
+  if (Math.abs(rate * 100 - cents) > 0.000001) {
+    return null;
+  }
+
+  return cents;
+}
+
+// Check whether a tutor matches the selected price range.
+function matchesPriceRange(rateCents, price) {
+  if (price === "Any price") {
+    return true;
+  }
+
+  if (rateCents === null) {
+    return false;
+  }
+
+  const range = priceRanges[price];
+
+  if (!range) {
+    return false;
+  }
+
+  const [minimum, maximum] = range;
+
+  return (
+    rateCents >= minimum &&
+    rateCents <= maximum
+  );
+}
+
+// Compare tutor prices while keeping unavailable rates at the bottom.
+function comparePrices(a, b, descending = false) {
+  const first = a.hourlyRateCents;
+  const second = b.hourlyRateCents;
+
+  if (first === null && second === null) {
+    return 0;
+  }
+
+  if (first === null) {
+    return 1;
+  }
+
+  if (second === null) {
+    return -1;
+  }
+
+  return descending
+    ? second - first
+    : first - second;
+}
 
 // Prepare tutor information in a consistent format.
 function normalizeTutor(tutor) {
@@ -31,10 +118,16 @@ function normalizeTutor(tutor) {
     // Remove subjects that do not have a name.
     .filter((subject) => subject?.name);
 
-  // Convert the tutor's hourly rate into a number.
-  const hourlyRate = Number(
+  // Validate the tutor's hourly teaching rate.
+  const hourlyRateCents = getHourlyRateCents(
     tutor.hourlyRate ?? tutor.hourly_rate
   );
+
+  // Convert valid rates into Canadian dollars.
+  const hourlyRate =
+    hourlyRateCents === null
+      ? null
+      : hourlyRateCents / 100;
 
   // Get the tutor's original rating value.
   const rawRating = tutor.rating;
@@ -56,10 +149,10 @@ function normalizeTutor(tutor) {
     // Store the prepared list of subjects.
     subjects,
 
-    // Keep valid hourly rates or use null when invalid.
-    hourlyRate: Number.isFinite(hourlyRate)
-      ? hourlyRate
-      : null,
+    // Store validated rates without treating missing prices as free.
+    hourlyRate,
+    hourly_rate: hourlyRate,
+    hourlyRateCents,
 
     // Keep valid ratings or use null when unavailable.
     rating:
@@ -74,7 +167,9 @@ function normalizeTutor(tutor) {
 
     // Use appointment-based availability as the default.
     availabilityStatus:
-      tutor.availabilityStatus || "appointment",
+      tutor.availabilityStatus ||
+      tutor.availability_status ||
+      "appointment",
   };
 }
 
@@ -160,18 +255,11 @@ export function TutorDiscovery({ tutors = [] }) {
           (item) => item.name === subject
         );
 
-      // Get the tutor's hourly rate for price filtering.
-      const rate = tutor.hourlyRate;
-
-      // Check whether the tutor's rate matches the selected price range.
-      const matchesPrice =
-        price === "Any price" ||
-        (rate !== null &&
-          (price === "Under $45"
-            ? rate < 45
-            : price === "$45–$55"
-              ? rate >= 45 && rate <= 55
-              : rate > 55));
+      // Check whether the tutor matches the selected price range.
+      const matchesPrice = matchesPriceRange(
+        tutor.hourlyRateCents,
+        price
+      );
 
       // Check whether the tutor meets the selected minimum rating.
       const matchesRating =
@@ -198,10 +286,12 @@ export function TutorDiscovery({ tutors = [] }) {
     return [...filtered].sort((a, b) => {
       // Sort tutors from the lowest hourly rate to the highest.
       if (sort === "Price: low to high") {
-        return (
-          (a.hourlyRate ?? Infinity) -
-          (b.hourlyRate ?? Infinity)
-        );
+        return comparePrices(a, b);
+      }
+
+      // Sort tutors from the highest hourly rate to the lowest.
+      if (sort === "Price: high to low") {
+        return comparePrices(a, b, true);
       }
 
       // Sort tutors from the highest rating to the lowest.
@@ -281,11 +371,9 @@ export function TutorDiscovery({ tutors = [] }) {
             onChange={setPrice}
             options={[
               "Any price",
-              "Under $45",
-              "$45–$55",
-              "Over $55",
+              ...Object.keys(priceRanges),
             ]}
-            ariaLabel="Filter by hourly price"
+            ariaLabel="Filter by hourly price in Canadian dollars"
           />
 
           {/* Filter tutors by their minimum rating. */}
@@ -326,9 +414,32 @@ export function TutorDiscovery({ tutors = [] }) {
               "Recommended",
               ...(hasRatings ? ["Rating"] : []),
               "Price: low to high",
+              "Price: high to low",
             ]}
             ariaLabel="Sort tutors"
           />
+        </div>
+
+        {/* Explain the platform's hourly pricing. */}
+        <div className="mt-4 rounded-xl bg-[#f7f9fd] p-4">
+          <p className="text-sm font-bold text-[#17233d]">
+            Affordable one-on-one tutoring
+          </p>
+
+          <p className="mt-1 text-xs leading-5 text-[#68758c]">
+            Tutors can offer free sessions or charge up to
+            $25 CAD per hour. Your total session price
+            depends on the selected duration.
+          </p>
+        </div>
+
+        {/* Inform students about the current payment availability. */}
+        <div className="mt-3 rounded-xl bg-[#fff7dc] p-3">
+          <p className="text-xs font-medium leading-5 text-[#9f7500]">
+            Free tutoring sessions are available for
+            booking. Paid bookings will become available
+            once payment integration is complete.
+          </p>
         </div>
       </div>
 
@@ -342,7 +453,9 @@ export function TutorDiscovery({ tutors = [] }) {
           <span className="font-extrabold text-[#17233d]">
             {results.length}
           </span>{" "}
-          tutors match your search
+          {results.length === 1
+            ? "tutor matches your search"
+            : "tutors match your search"}
         </p>
 
         {/* Allow students to clear all active filters. */}

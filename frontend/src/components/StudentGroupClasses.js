@@ -11,18 +11,161 @@ const statusStyles = {
   absent: "bg-gray-100 text-gray-700",
 };
 
+const paymentStyles = {
+  paid: "bg-green-100 text-green-700",
+  not_required: "bg-green-100 text-green-700",
+  pending: "bg-yellow-100 text-yellow-700",
+  unpaid: "bg-yellow-100 text-yellow-700",
+  failed: "bg-red-100 text-red-700",
+  refunded: "bg-blue-100 text-blue-700",
+};
+
+const paymentLabels = {
+  paid: "Paid",
+  not_required: "No payment required",
+  pending: "Payment pending",
+  unpaid: "Unpaid",
+  failed: "Payment failed",
+  refunded: "Refunded",
+};
+
+// Format an amount in Canadian dollars.
 function formatCurrency(cents) {
+  if (
+    cents == null ||
+    cents === "" ||
+    !Number.isSafeInteger(Number(cents)) ||
+    Number(cents) < 0
+  ) {
+    return "Unavailable";
+  }
+
   return new Intl.NumberFormat("en-CA", {
     style: "currency",
     currency: "CAD",
-  }).format(Number(cents || 0) / 100);
+  }).format(Number(cents) / 100);
 }
 
+// Format the scheduled class date and time.
 function formatDate(value) {
   return new Date(value).toLocaleString("en-CA", {
     dateStyle: "medium",
     timeStyle: "short",
   });
+}
+
+// Retrieve the price recorded when the student enrolled.
+function getEnrollmentPrice(item) {
+  const value = item.enrollment_price_cents;
+
+  if (value == null || value === "") {
+    return null;
+  }
+
+  const priceCents = Number(value);
+
+  if (
+    !Number.isSafeInteger(priceCents) ||
+    priceCents < 0
+  ) {
+    return null;
+  }
+
+  return priceCents;
+}
+
+// Retrieve the current class price.
+function getClassPrice(item) {
+  if (item.price_cents == null || item.price_cents === "") {
+    return null;
+  }
+
+  const priceCents = Number(item.price_cents);
+
+  return Number.isSafeInteger(priceCents) &&
+    priceCents >= 0
+    ? priceCents
+    : null;
+}
+
+// Verify that the student's payment requirements are satisfied.
+function hasEligiblePayment(item) {
+  const enrollmentPrice = getEnrollmentPrice(item);
+  const classPrice = getClassPrice(item);
+
+  const priceCents = enrollmentPrice ?? classPrice;
+
+  if (
+    priceCents === null ||
+    classPrice === null ||
+    item.amount_paid_cents == null ||
+    item.amount_paid_cents === ""
+  ) {
+    return false;
+  }
+
+  const amountPaid = Number(item.amount_paid_cents);
+
+  if (
+    !Number.isSafeInteger(amountPaid) ||
+    amountPaid < 0
+  ) {
+    return false;
+  }
+
+  if (priceCents === 0 && classPrice === 0) {
+    return (
+      item.payment_status === "not_required" &&
+      amountPaid === 0
+    );
+  }
+
+  return (
+    priceCents > 0 &&
+    classPrice > 0 &&
+    item.payment_status === "paid" &&
+    amountPaid >= priceCents &&
+    amountPaid >= classPrice
+  );
+}
+
+// Check whether a free enrolment can be cancelled or reactivated.
+function hasNoPaymentObligation(item) {
+  const enrollmentPrice = getEnrollmentPrice(item);
+  const classPrice = getClassPrice(item);
+
+  return (
+    classPrice === 0 &&
+    (enrollmentPrice === null || enrollmentPrice === 0) &&
+    item.amount_paid_cents != null &&
+    item.amount_paid_cents !== "" &&
+    Number(item.amount_paid_cents) === 0 &&
+    ["not_required", "unpaid", "failed"].includes(
+      item.payment_status
+    )
+  );
+}
+
+// Check whether the student can cancel their enrolment.
+function canCancelEnrollment(item) {
+  return (
+    item.status === "published" &&
+    new Date(item.scheduled_at) > new Date() &&
+    ["pending", "confirmed"].includes(
+      item.enrollment_status
+    ) &&
+    hasNoPaymentObligation(item)
+  );
+}
+
+// Check whether a cancelled enrolment can be reactivated.
+function canReactivateEnrollment(item) {
+  return (
+    item.enrollment_status === "cancelled" &&
+    item.status === "published" &&
+    new Date(item.scheduled_at) > new Date() &&
+    hasNoPaymentObligation(item)
+  );
 }
 
 export default function StudentGroupClasses() {
@@ -59,7 +202,11 @@ export default function StudentGroupClasses() {
         }
 
         if (!controller.signal.aborted) {
-          setClasses(data.enrollments || []);
+          setClasses(
+            Array.isArray(data.enrollments)
+              ? data.enrollments
+              : []
+          );
         }
       } catch (error) {
         if (!controller.signal.aborted) {
@@ -79,7 +226,12 @@ export default function StudentGroupClasses() {
 
   // Allow a student to cancel their group class enrolment.
   async function handleCancelEnrollment(item) {
-    if (cancellingId !== null) return;
+    if (
+      cancellingId !== null ||
+      !canCancelEnrollment(item)
+    ) {
+      return;
+    }
 
     // Confirm cancellation before sending the request.
     const confirmed = window.confirm(
@@ -116,6 +268,12 @@ export default function StudentGroupClasses() {
                 ...groupClass,
                 enrollment_status:
                   data.enrollment.enrollment_status,
+                payment_status:
+                  data.enrollment.payment_status ??
+                  groupClass.payment_status,
+                amount_paid_cents:
+                  data.enrollment.amount_paid_cents ??
+                  groupClass.amount_paid_cents,
               }
             : groupClass
         )
@@ -163,6 +321,20 @@ export default function StudentGroupClasses() {
       item.enrollment_status === "cancelled"
   );
 
+  // Identify enrolments with outstanding payment requirements.
+  const pendingPaymentClasses = classes.filter(
+    (item) =>
+      item.status !== "cancelled" &&
+      item.status !== "completed" &&
+      ["pending", "confirmed"].includes(
+        item.enrollment_status
+      ) &&
+      (getEnrollmentPrice(item) ?? getClassPrice(item)) > 0 &&
+      ["unpaid", "pending", "failed"].includes(
+        item.payment_status
+      )
+  );
+
   const statistics = [
     ["Total enrollments", classes.length],
     ["Upcoming / Live classes", upcomingClasses.length],
@@ -177,7 +349,9 @@ export default function StudentGroupClasses() {
         ? completedClasses
         : filter === "cancelled"
           ? cancelledClasses
-          : classes;
+          : filter === "pending-payment"
+            ? pendingPaymentClasses
+            : classes;
 
   return (
     <div className="space-y-6">
@@ -193,8 +367,8 @@ export default function StudentGroupClasses() {
           </h1>
 
           <p className="mt-2 text-sm text-[#64748b]">
-            Manage your group learning sessions and
-            track your enrollments.
+            Manage your group learning sessions, track
+            your enrollments and review your payments.
           </p>
         </div>
 
@@ -258,6 +432,32 @@ export default function StudentGroupClasses() {
             ))}
           </div>
 
+          {/* Outstanding payment notice */}
+          {pendingPaymentClasses.length > 0 && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-5">
+              <h3 className="text-sm font-extrabold text-amber-800">
+                Outstanding Payments
+              </h3>
+
+              <p className="mt-2 text-sm leading-6 text-amber-700">
+                You have {pendingPaymentClasses.length}{" "}
+                {pendingPaymentClasses.length === 1
+                  ? "class"
+                  : "classes"}{" "}
+                with outstanding payment requirements.
+                Online payments are coming soon.
+              </p>
+
+              <button
+                type="button"
+                onClick={() => setFilter("pending-payment")}
+                className="mt-3 text-sm font-bold text-amber-800"
+              >
+                View Outstanding Payments
+              </button>
+            </div>
+          )}
+
           {/* Filters */}
           <div className="flex flex-wrap items-center justify-between gap-4">
             <h2 className="text-xl font-extrabold">
@@ -286,6 +486,10 @@ export default function StudentGroupClasses() {
 
               <option value="cancelled">
                 Cancelled
+              </option>
+
+              <option value="pending-payment">
+                Outstanding payments
               </option>
             </select>
           </div>
@@ -318,32 +522,26 @@ export default function StudentGroupClasses() {
                   item.status === "cancelled" ||
                   item.enrollment_status === "cancelled";
 
-                const isUpcoming =
-                  item.status === "published" &&
-                  new Date(item.scheduled_at) > new Date();
-
-                // Identify an active live classroom.
                 const isLive =
                   item.status === "live";
 
                 const isConfirmed =
                   item.enrollment_status === "confirmed";
 
-                const isFree =
-                  Number(item.price_cents) === 0;
+                const enrollmentPrice =
+                  getEnrollmentPrice(item);
 
-                // Verify that the payment requirements are satisfied.
+                const classPrice =
+                  getClassPrice(item);
+
+                const displayPrice =
+                  enrollmentPrice ?? classPrice;
+
+                const isFree =
+                  displayPrice === 0;
+
                 const hasValidPayment =
-                  (
-                    isFree &&
-                    item.payment_status === "not_required"
-                  ) ||
-                  (
-                    Number(item.price_cents) > 0 &&
-                    item.payment_status === "paid" &&
-                    Number(item.amount_paid_cents) >=
-                      Number(item.price_cents)
-                  );
+                  hasEligiblePayment(item);
 
                 // Check whether the student can join the live classroom.
                 const canJoin =
@@ -361,30 +559,23 @@ export default function StudentGroupClasses() {
 
                 // Check whether the enrolment can be safely cancelled.
                 const canCancel =
-                  !isCancelled &&
-                  isUpcoming &&
-                  isFree &&
-                  ["pending", "confirmed"].includes(
-                    item.enrollment_status
-                  ) &&
-                  Number(item.amount_paid_cents) === 0 &&
-                  ["not_required", "unpaid", "failed"].includes(
-                    item.payment_status
-                  );
+                  canCancelEnrollment(item);
 
                 // Check whether a cancelled enrolment can be reactivated.
                 const canReEnroll =
-                  item.enrollment_status === "cancelled" &&
-                  isUpcoming &&
-                  isFree &&
-                  Number(item.amount_paid_cents) === 0 &&
-                  ["not_required", "unpaid", "failed"].includes(
-                    item.payment_status
-                  );
+                  canReactivateEnrollment(item);
 
                 // Identify the enrolment currently being cancelled.
                 const isCancelling =
                   cancellingId === item.id;
+
+                const paymentLabel =
+                  paymentLabels[item.payment_status] ||
+                  "Payment status unavailable";
+
+                const paymentStyle =
+                  paymentStyles[item.payment_status] ||
+                  "bg-gray-100 text-gray-700";
 
                 return (
                   <article
@@ -406,6 +597,26 @@ export default function StudentGroupClasses() {
                           <h3 className="mt-2 text-xl font-extrabold">
                             {item.subject}
                           </h3>
+                        </div>
+
+                        <div className="mt-4">
+                          <p className="text-xs text-blue-100">
+                            {enrollmentPrice === null
+                              ? "Current class price"
+                              : "Enrolment price"}
+                          </p>
+
+                          <p className="mt-1 text-lg font-extrabold">
+                            {isFree
+                              ? "Free"
+                              : displayPrice === null
+                                ? "Unavailable"
+                                : `${formatCurrency(displayPrice)} CAD`}
+                          </p>
+
+                          <p className="mt-1 text-xs text-blue-100">
+                            Per student, per session
+                          </p>
                         </div>
                       </div>
 
@@ -432,6 +643,13 @@ export default function StudentGroupClasses() {
                               }`}
                             >
                               {item.enrollment_status}
+                            </span>
+
+                            {/* Display the current payment status. */}
+                            <span
+                              className={`rounded-full px-3 py-1 text-xs font-bold ${paymentStyle}`}
+                            >
+                              {paymentLabel}
                             </span>
 
                             {/* Display a live classroom indicator. */}
@@ -472,15 +690,39 @@ export default function StudentGroupClasses() {
 
                           <div>
                             <p className="text-xs font-bold text-[#8190a8]">
-                              AMOUNT PAID
+                              {enrollmentPrice === null
+                                ? "CURRENT CLASS PRICE"
+                                : "ENROLMENT PRICE"}
                             </p>
 
                             <p className="mt-1 text-sm font-bold">
                               {isFree
                                 ? "Free"
-                                : formatCurrency(
-                                    item.amount_paid_cents
-                                  )}
+                                : displayPrice === null
+                                  ? "Unavailable"
+                                  : `${formatCurrency(displayPrice)} CAD`}
+                            </p>
+
+                            <p className="mt-1 text-xs text-[#64748b]">
+                              Per student, per session
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-xs font-bold text-[#8190a8]">
+                              AMOUNT PAID
+                            </p>
+
+                            <p className="mt-1 text-sm font-bold">
+                              {item.amount_paid_cents == null
+                                ? "Unavailable"
+                                : `${formatCurrency(item.amount_paid_cents)}${
+                                    formatCurrency(
+                                      item.amount_paid_cents
+                                    ) === "Unavailable"
+                                      ? ""
+                                      : " CAD"
+                                  }`}
                             </p>
                           </div>
 
@@ -489,11 +731,8 @@ export default function StudentGroupClasses() {
                               PAYMENT STATUS
                             </p>
 
-                            <p className="mt-1 text-sm font-bold capitalize">
-                              {item.payment_status?.replaceAll(
-                                "_",
-                                " "
-                              )}
+                            <p className="mt-1 text-sm font-bold">
+                              {paymentLabel}
                             </p>
                           </div>
 
@@ -518,7 +757,64 @@ export default function StudentGroupClasses() {
                               ).toLocaleDateString("en-CA")}
                             </p>
                           </div>
+
+                          <div>
+                            <p className="text-xs font-bold text-[#8190a8]">
+                              CURRENCY
+                            </p>
+
+                            <p className="mt-1 text-sm font-bold">
+                              {item.enrollment_currency ||
+                                item.currency ||
+                                "CAD"}
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-xs font-bold text-[#8190a8]">
+                              CLASS FORMAT
+                            </p>
+
+                            <p className="mt-1 text-sm font-bold">
+                              Online group session
+                            </p>
+                          </div>
                         </div>
+
+                        {/* Explain when the original enrolment price is unavailable. */}
+                        {enrollmentPrice === null && (
+                          <p className="text-xs leading-5 text-[#64748b]">
+                            The original enrolment price is not
+                            available for this record. The displayed
+                            class price is the current listed price.
+                          </p>
+                        )}
+
+                        {/* Display free enrolment information. */}
+                        {!isCancelled &&
+                          isFree &&
+                          item.payment_status === "not_required" && (
+                            <p className="text-xs font-semibold text-green-700">
+                              This is a free group class.
+                              No payment is required.
+                            </p>
+                          )}
+
+                        {/* Display paid enrolment information. */}
+                        {!isCancelled &&
+                          displayPrice > 0 &&
+                          item.payment_status === "paid" && (
+                            <p className="text-xs font-semibold text-green-700">
+                              Your payment has been recorded.
+                            </p>
+                          )}
+
+                        {/* Display refunded payment information. */}
+                        {item.payment_status === "refunded" && (
+                          <p className="text-xs font-semibold text-blue-700">
+                            This enrolment has been marked as refunded.
+                          </p>
+                        )}
 
                         {/* Class actions */}
                         <div className="flex flex-wrap gap-3 border-t border-[#edf0f5] pt-4">
@@ -609,9 +905,55 @@ export default function StudentGroupClasses() {
                             item.status
                           ) && (
                             <p className="text-xs font-semibold text-amber-700">
-                              Payment requirements must be
-                              satisfied before joining this
-                              classroom.
+                              Your payment or enrolment details
+                              must be verified before joining
+                              this classroom.
+                            </p>
+                          )}
+
+                        {/* Display pending enrolment information. */}
+                        {!isCancelled &&
+                          item.enrollment_status === "pending" &&
+                          item.status !== "completed" && (
+                            <p className="text-xs font-semibold text-amber-700">
+                              Your enrolment is pending
+                              confirmation.
+                            </p>
+                          )}
+
+                        {/* Display the paid enrolment availability notice. */}
+                        {!isCancelled &&
+                          displayPrice > 0 &&
+                          ["pending", "confirmed"].includes(
+                            item.enrollment_status
+                          ) &&
+                          ["published", "live"].includes(
+                            item.status
+                          ) &&
+                          ["unpaid", "pending", "failed"].includes(
+                            item.payment_status
+                          ) && (
+                            <p className="text-xs font-semibold text-[#26469b]">
+                              Online payments are coming soon.
+                            </p>
+                          )}
+
+                        {/* Display paid cancellation information. */}
+                        {!isCancelled &&
+                          item.status === "published" &&
+                          new Date(item.scheduled_at) > new Date() &&
+                          ["pending", "confirmed"].includes(
+                            item.enrollment_status
+                          ) &&
+                          (
+                            item.payment_status === "paid" ||
+                            item.payment_status === "pending" ||
+                            Number(item.amount_paid_cents) > 0
+                          ) && (
+                            <p className="text-xs leading-5 text-[#64748b]">
+                              Enrolments with paid or pending
+                              transactions cannot currently be
+                              cancelled through this dashboard.
                             </p>
                           )}
 

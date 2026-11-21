@@ -7,6 +7,15 @@ const {
   hasBookingConflict,
 } = require("../utils/schedulingConflict");
 
+// Import shared pricing rules.
+const {
+  getPricingConfig,
+  getMaximumGroupStudents,
+  validateGroupPricing,
+  calculateRevenueSplit,
+  getInitialPaymentStatus,
+} = require("../utils/pricing");
+
 // Return an error response.
 function fail(res, status, message) {
   return res.status(status).json({
@@ -21,7 +30,7 @@ function validId(id) {
 }
 
 // Validate class information.
-function validateClass(body) {
+function validateClass(body, pricing) {
   const title = String(body.title || "").trim();
   const description = String(body.description || "").trim();
   const subject = String(body.subject || "").trim();
@@ -29,9 +38,29 @@ function validateClass(body) {
 
   const scheduledAt = new Date(body.scheduledAt);
   const durationMinutes = Number(body.durationMinutes ?? 60);
-  const priceCents = Number(body.priceCents ?? 500);
+
+  // Keep the default price within the current platform limits.
+  const defaultPrice = Math.min(
+    pricing.MAX_GROUP_PRICE_CENTS,
+    Math.max(
+      pricing.MIN_GROUP_PRICE_CENTS,
+      Math.min(
+        500,
+        Math.floor(
+          pricing.MAX_GROUP_REVENUE_CENTS /
+            pricing.MIN_GROUP_CAPACITY
+        )
+      )
+    )
+  );
+
+  const priceCents = Number(body.priceCents ?? defaultPrice);
   const minimumStudents = Number(body.minimumStudents ?? 1);
-  const maximumStudents = Number(body.maximumStudents ?? 20);
+
+  const maximumStudents = Number(
+    body.maximumStudents ??
+      getMaximumGroupStudents(priceCents, pricing)
+  );
 
   if (!title || title.length > 150) {
     throw new Error("Enter a valid class title.");
@@ -64,29 +93,13 @@ function validateClass(body) {
     throw new Error("Duration must be between 15 and 180 minutes.");
   }
 
-  if (
-    !Number.isInteger(priceCents) ||
-    priceCents < 0 ||
-    priceCents > 100000
-  ) {
-    throw new Error("Enter a valid participation fee.");
-  }
-
-  if (
-    !Number.isInteger(maximumStudents) ||
-    maximumStudents < 2 ||
-    maximumStudents > 100
-  ) {
-    throw new Error("Class capacity must be between 2 and 100.");
-  }
-
-  if (
-    !Number.isInteger(minimumStudents) ||
-    minimumStudents < 1 ||
-    minimumStudents > maximumStudents
-  ) {
-    throw new Error("Invalid minimum number of students.");
-  }
+  // Check the price and capacity against the platform rules.
+  validateGroupPricing(
+    priceCents,
+    minimumStudents,
+    maximumStudents,
+    pricing
+  );
 
   return [
     title,
@@ -206,16 +219,25 @@ async function createGroupClass(req, res) {
     return fail(res, 403, "Only tutors can create group classes.");
   }
 
-  let values;
+  let client;
 
   try {
-    values = validateClass(req.body || {});
-  } catch (error) {
-    return fail(res, 400, error.message);
-  }
+    client = await pool.connect();
+    await client.query("BEGIN");
 
-  try {
-    const tutor = await pool.query(
+    // Retrieve the current platform pricing configuration.
+    const pricing = await getPricingConfig(client);
+
+    let values;
+
+    try {
+      values = validateClass(req.body || {}, pricing);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      return fail(res, 400, error.message);
+    }
+
+    const tutor = await client.query(
       `
         SELECT tp.user_id
         FROM public.tutor_profiles tp
@@ -227,10 +249,11 @@ async function createGroupClass(req, res) {
     );
 
     if (!tutor.rows.length) {
+      await client.query("ROLLBACK");
       return fail(res, 403, "Complete your tutor profile first.");
     }
 
-    const result = await pool.query(
+    const result = await client.query(
       `
         INSERT INTO public.group_classes (
           tutor_id,
@@ -253,14 +276,22 @@ async function createGroupClass(req, res) {
       [req.user.userId, ...values]
     );
 
+    await client.query("COMMIT");
+
     res.status(201).json({
       success: true,
       message: "Group class created successfully.",
       groupClass: result.rows[0],
     });
   } catch (error) {
+    if (client) {
+      await client.query("ROLLBACK").catch(console.error);
+    }
+
     console.error("Create group class error:", error.message);
     return fail(res, 500, "Unable to create group class.");
+  } finally {
+    if (client) client.release();
   }
 }
 
@@ -276,16 +307,25 @@ async function updateGroupClass(req, res) {
     return fail(res, 400, "Invalid class ID.");
   }
 
-  let values;
+  let client;
 
   try {
-    values = validateClass(req.body || {});
-  } catch (error) {
-    return fail(res, 400, error.message);
-  }
+    client = await pool.connect();
+    await client.query("BEGIN");
 
-  try {
-    const result = await pool.query(
+    // Retrieve the current platform pricing configuration.
+    const pricing = await getPricingConfig(client);
+
+    let values;
+
+    try {
+      values = validateClass(req.body || {}, pricing);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      return fail(res, 400, error.message);
+    }
+
+    const result = await client.query(
       `
         UPDATE public.group_classes
         SET
@@ -308,8 +348,11 @@ async function updateGroupClass(req, res) {
     );
 
     if (!result.rows.length) {
+      await client.query("ROLLBACK");
       return fail(res, 404, "Editable draft class not found.");
     }
+
+    await client.query("COMMIT");
 
     res.json({
       success: true,
@@ -317,8 +360,14 @@ async function updateGroupClass(req, res) {
       groupClass: result.rows[0],
     });
   } catch (error) {
+    if (client) {
+      await client.query("ROLLBACK").catch(console.error);
+    }
+
     console.error("Update group class error:", error.message);
     return fail(res, 500, "Unable to update group class.");
+  } finally {
+    if (client) client.release();
   }
 }
 
@@ -375,6 +424,26 @@ async function updateGroupClassStatus(req, res) {
         return fail(res, 409, "This class cannot be published.");
       }
 
+      // Retrieve the latest platform pricing rules.
+      const pricing = await getPricingConfig(client);
+
+      // Check pricing again before publishing the class.
+      try {
+        validateGroupPricing(
+          Number(groupClass.price_cents),
+          Number(groupClass.minimum_students),
+          Number(groupClass.maximum_students),
+          pricing
+        );
+
+        if (groupClass.currency !== pricing.CURRENCY) {
+          throw new Error("Invalid group class currency.");
+        }
+      } catch (error) {
+        await client.query("ROLLBACK");
+        return fail(res, 400, error.message);
+      }
+
       // Check for overlapping published or live group classes.
       const groupConflict = await hasGroupClassConflict(
         client,
@@ -426,7 +495,10 @@ async function updateGroupClassStatus(req, res) {
           SELECT id
           FROM public.group_class_enrollments
           WHERE class_id = $1
-          AND payment_status IN ('paid', 'pending')
+          AND (
+            payment_status IN ('paid', 'pending')
+            OR amount_paid_cents > 0
+          )
           LIMIT 1
         `,
         [id]
@@ -468,7 +540,10 @@ async function updateGroupClassStatus(req, res) {
       groupClass: updated.rows[0],
     });
   } catch (error) {
-    if (client) await client.query("ROLLBACK");
+    if (client) {
+      await client.query("ROLLBACK").catch(console.error);
+    }
+
     console.error("Class status error:", error.message);
     return fail(res, 500, "Unable to update class status.");
   } finally {
@@ -520,8 +595,45 @@ async function enrollInGroupClass(req, res) {
       return fail(res, 409, "This class is not open for enrolment.");
     }
 
+    // Retrieve the current platform pricing configuration.
+    const pricing = await getPricingConfig(client);
+
+    // Use the price stored in the database.
+    const priceCents = Number(groupClass.price_cents);
+
+    let paymentStatus;
+    let revenue;
+
+    try {
+      validateGroupPricing(
+        priceCents,
+        Number(groupClass.minimum_students),
+        Number(groupClass.maximum_students),
+        pricing
+      );
+
+      if (groupClass.currency !== pricing.CURRENCY) {
+        throw new Error("Invalid group class currency.");
+      }
+
+      // Determine whether enrolment is permitted.
+      paymentStatus = getInitialPaymentStatus(
+        priceCents,
+        pricing
+      );
+
+      // Calculate the commission and tutor earnings.
+      revenue = calculateRevenueSplit(
+        priceCents,
+        pricing
+      );
+    } catch (error) {
+      await client.query("ROLLBACK");
+      return fail(res, 409, error.message);
+    }
+
     // Paid enrolments require verified payment integration.
-    if (Number(groupClass.price_cents) > 0) {
+    if (priceCents > 0) {
       await client.query("ROLLBACK");
 
       return fail(
@@ -606,23 +718,34 @@ async function enrollInGroupClass(req, res) {
     let result;
 
     if (existingEnrollment) {
-      // Reactivate the student's previously cancelled enrolment.
+      // Reactivate the cancelled enrolment with its current pricing.
       result = await client.query(
         `
           UPDATE public.group_class_enrollments
           SET
             enrollment_status = 'confirmed',
-            payment_status = 'not_required',
+            payment_status = $6,
             amount_paid_cents = 0,
+            price_cents = $2,
+            platform_commission_cents = $3,
+            tutor_earnings_cents = $4,
+            currency = $5,
             enrolled_at = NOW(),
             updated_at = NOW()
           WHERE id = $1
           RETURNING *
         `,
-        [existingEnrollment.id]
+        [
+          existingEnrollment.id,
+          priceCents,
+          revenue.platformCommissionCents,
+          revenue.tutorEarningsCents,
+          revenue.currency,
+          paymentStatus,
+        ]
       );
     } else {
-      // Create a new enrolment for a first-time participant.
+      // Store the agreed price and revenue split for the enrolment.
       result = await client.query(
         `
           INSERT INTO public.group_class_enrollments (
@@ -630,12 +753,34 @@ async function enrollInGroupClass(req, res) {
             student_id,
             amount_paid_cents,
             payment_status,
-            enrollment_status
+            enrollment_status,
+            price_cents,
+            platform_commission_cents,
+            tutor_earnings_cents,
+            currency
           )
-          VALUES ($1, $2, 0, 'not_required', 'confirmed')
+          VALUES (
+            $1,
+            $2,
+            0,
+            $7,
+            'confirmed',
+            $3,
+            $4,
+            $5,
+            $6
+          )
           RETURNING *
         `,
-        [id, req.user.userId]
+        [
+          id,
+          req.user.userId,
+          priceCents,
+          revenue.platformCommissionCents,
+          revenue.tutorEarningsCents,
+          revenue.currency,
+          paymentStatus,
+        ]
       );
     }
 
@@ -649,7 +794,9 @@ async function enrollInGroupClass(req, res) {
       enrollment: result.rows[0],
     });
   } catch (error) {
-    if (client) await client.query("ROLLBACK");
+    if (client) {
+      await client.query("ROLLBACK").catch(console.error);
+    }
 
     if (error.code === "23505") {
       return fail(res, 409, "An enrolment already exists.");
@@ -823,6 +970,8 @@ async function getMyEnrollments(req, res) {
           e.enrollment_status,
           e.payment_status,
           e.amount_paid_cents,
+          e.price_cents AS enrollment_price_cents,
+          e.currency AS enrollment_currency,
           e.enrolled_at
         FROM public.group_class_enrollments e
         JOIN public.group_classes gc
@@ -879,6 +1028,11 @@ async function getClassStudents(req, res) {
           u.full_name,
           e.enrollment_status,
           e.payment_status,
+          e.price_cents,
+          e.amount_paid_cents,
+          e.platform_commission_cents,
+          e.tutor_earnings_cents,
+          e.currency,
           e.enrolled_at
         FROM public.group_class_enrollments e
         JOIN public.users u ON u.id = e.student_id

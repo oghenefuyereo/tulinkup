@@ -11,6 +11,13 @@ const {
   generateLiveKitToken,
 } = require("../config/livekit");
 
+// Use the original pricing rules to validate existing bookings and enrolments.
+const {
+  PRICING: ORIGINAL_PRICING,
+  calculatePrivateSessionPrice,
+  validateGroupPricing,
+} = require("../utils/pricing");
+
 // Configure the classroom access window.
 const EARLY_ACCESS_MINUTES = 15;
 const GRACE_PERIOD_MINUTES = 15;
@@ -28,6 +35,144 @@ function validSession(type, id) {
   return (
     ["one_on_one", "group"].includes(type) &&
     /^[1-9]\d*$/.test(String(id))
+  );
+}
+
+// Check whether a stored monetary amount is valid.
+function validAmount(value) {
+  return (
+    Number.isSafeInteger(value) &&
+    value >= 0
+  );
+}
+
+// Verify the pricing and payment of a private booking.
+function hasValidPrivatePayment(booking) {
+  const {
+    hourly_rate_cents,
+    total_price_cents,
+    platform_commission_cents,
+    tutor_earnings_cents,
+    duration_minutes,
+    currency,
+    payment_status,
+  } = booking;
+
+  // Reject bookings without valid stored pricing.
+  if (
+    !validAmount(hourly_rate_cents) ||
+    !validAmount(total_price_cents) ||
+    !validAmount(platform_commission_cents) ||
+    !validAmount(tutor_earnings_cents) ||
+    currency !== ORIGINAL_PRICING.CURRENCY
+  ) {
+    return false;
+  }
+
+  // Verify the original session price.
+  try {
+    const expectedPrice =
+      calculatePrivateSessionPrice(
+        hourly_rate_cents,
+        duration_minutes,
+        ORIGINAL_PRICING
+      );
+
+    if (expectedPrice !== total_price_cents) {
+      return false;
+    }
+  } catch {
+    return false;
+  }
+
+  // Verify the stored revenue breakdown.
+  if (
+    platform_commission_cents +
+      tutor_earnings_cents !==
+    total_price_cents
+  ) {
+    return false;
+  }
+
+  // Free sessions do not require payment.
+  if (total_price_cents === 0) {
+    return payment_status === "not_required";
+  }
+
+  // Paid sessions require a verified payment status.
+  return payment_status === "paid";
+}
+
+// Verify the original group class pricing and capacity.
+function hasValidGroupPricing(classroom) {
+  if (
+    !validAmount(classroom.price_cents) ||
+    classroom.currency !== ORIGINAL_PRICING.CURRENCY
+  ) {
+    return false;
+  }
+
+  try {
+    validateGroupPricing(
+      classroom.price_cents,
+      classroom.minimum_students,
+      classroom.maximum_students,
+      ORIGINAL_PRICING
+    );
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Verify a student's group class payment.
+function hasValidGroupPayment(
+  enrollment,
+  classroom
+) {
+  if (
+    !enrollment ||
+    enrollment.enrollment_status !== "confirmed" ||
+    enrollment.currency !== ORIGINAL_PRICING.CURRENCY ||
+    !validAmount(enrollment.amount_paid_cents)
+  ) {
+    return false;
+  }
+
+  // Use the price stored when the student enrolled.
+  let priceCents = enrollment.price_cents;
+
+  // Preserve older confirmed free enrolments.
+  if (
+    priceCents === null &&
+    classroom.price_cents === 0 &&
+    enrollment.payment_status === "not_required" &&
+    enrollment.amount_paid_cents === 0
+  ) {
+    priceCents = 0;
+  }
+
+  // Reject missing or invalid enrolment prices.
+  if (
+    !validAmount(priceCents) ||
+    priceCents > ORIGINAL_PRICING.MAX_GROUP_PRICE_CENTS
+  ) {
+    return false;
+  }
+
+  // Free enrolments must not contain a payment.
+  if (priceCents === 0) {
+    return (
+      enrollment.payment_status === "not_required" &&
+      enrollment.amount_paid_cents === 0
+    );
+  }
+
+  // Paid enrolments require payment of the stored price.
+  return (
+    enrollment.payment_status === "paid" &&
+    enrollment.amount_paid_cents >= priceCents
   );
 }
 
@@ -85,7 +230,35 @@ async function getLiveSession(client, type, id) {
   return result.rows[0];
 }
 
-// Check whether the participant has classroom access.
+// Retrieve a student's group class enrolment.
+async function getEnrollment(
+  client,
+  classId,
+  studentId
+) {
+  const result = await client.query(
+    `
+    SELECT
+      id,
+      class_id,
+      student_id,
+      price_cents,
+      amount_paid_cents,
+      currency,
+      payment_status,
+      enrollment_status
+    FROM public.group_class_enrollments
+    WHERE class_id = $1
+      AND student_id = $2
+    FOR UPDATE
+    `,
+    [classId, studentId]
+  );
+
+  return result.rows[0];
+}
+
+// Check whether the participant belongs to the classroom.
 async function hasAccess(
   client,
   classroom,
@@ -111,32 +284,51 @@ async function hasAccess(
     );
   }
 
-  // Verify group class enrolment and payment.
-  const result = await client.query(
-    `
-    SELECT id
-    FROM public.group_class_enrollments
-    WHERE class_id = $1
-      AND student_id = $2
-      AND enrollment_status = 'confirmed'
-      AND (
-        ($3::integer = 0
-          AND payment_status = 'not_required')
-        OR
-        ($3::integer > 0
-          AND payment_status = 'paid'
-          AND amount_paid_cents >= $3::integer)
-      )
-    FOR UPDATE
-    `,
-    [
-      classroom.id,
-      user.id,
-      classroom.price_cents,
-    ]
+  // Verify the student's group class enrolment.
+  const enrollment = await getEnrollment(
+    client,
+    classroom.id,
+    user.id
   );
 
-  return result.rows.length > 0;
+  return (
+    enrollment?.enrollment_status === "confirmed"
+  );
+}
+
+// Check whether classroom payment requirements are satisfied.
+async function hasEligiblePayment(
+  client,
+  classroom,
+  type,
+  user
+) {
+  // Both participants must satisfy private booking payment rules.
+  if (type === "one_on_one") {
+    return hasValidPrivatePayment(classroom);
+  }
+
+  // Verify the original group class pricing and capacity.
+  if (!hasValidGroupPricing(classroom)) {
+    return false;
+  }
+
+  // Tutors do not pay to teach their own group classes.
+  if (user.role === "tutor") {
+    return true;
+  }
+
+  // Verify the student's stored enrolment and payment.
+  const enrollment = await getEnrollment(
+    client,
+    classroom.id,
+    user.id
+  );
+
+  return hasValidGroupPayment(
+    enrollment,
+    classroom
+  );
 }
 
 // Check whether the classroom can be accessed.
@@ -149,6 +341,15 @@ function withinAccessWindow(classroom) {
     Number(classroom.duration_minutes) *
     60 *
     1000;
+
+  // Reject invalid scheduling information.
+  if (
+    !Number.isFinite(scheduled) ||
+    !Number.isFinite(duration) ||
+    duration <= 0
+  ) {
+    return false;
+  }
 
   const earliest =
     scheduled -
@@ -192,7 +393,9 @@ function isActiveClassroom(type, classroom) {
 // Manage classroom actions inside a transaction.
 async function handleSession(req, res, action) {
   const { type, id } =
-    action === "status" ? req.params : req.body || {};
+    action === "status"
+      ? req.params
+      : req.body || {};
 
   res.set("Cache-Control", "no-store");
 
@@ -201,6 +404,14 @@ async function handleSession(req, res, action) {
       res,
       400,
       "Invalid session type or ID."
+    );
+  }
+
+  if (!req.user?.userId) {
+    return fail(
+      res,
+      401,
+      "Log in to access the classroom."
     );
   }
 
@@ -280,23 +491,62 @@ async function handleSession(req, res, action) {
       id
     );
 
+    // Verify pricing and payment before granting classroom access.
+    const eligiblePayment =
+      action === "end"
+        ? false
+        : await hasEligiblePayment(
+            client,
+            classroom,
+            type,
+            user
+          );
+
     // Return the current classroom status.
     if (action === "status") {
+      const activeClassroom =
+        isActiveClassroom(type, classroom);
+
+      const insideAccessWindow =
+        withinAccessWindow(classroom);
+
+      const canStart =
+        user.role === "tutor" &&
+        eligiblePayment &&
+        activeClassroom &&
+        insideAccessWindow &&
+        (
+          !session ||
+          session.status === "scheduled"
+        );
+
+      const canJoin =
+        eligiblePayment &&
+        session?.status === "live" &&
+        activeClassroom &&
+        insideAccessWindow;
+
       await client.query("COMMIT");
 
       return res.json({
         success: true,
         session,
         classroomStatus: classroom.status,
-        canJoin:
-          session?.status === "live" &&
-          isActiveClassroom(type, classroom) &&
-          withinAccessWindow(classroom),
+        paymentEligible: eligiblePayment,
+        canStart,
+        canJoin,
       });
     }
 
     // Start or join a classroom.
     if (["start", "join"].includes(action)) {
+      if (!eligiblePayment) {
+        return await reject(
+          403,
+          "Classroom access requires valid pricing and verified payment."
+        );
+      }
+
       if (!isActiveClassroom(type, classroom)) {
         return await reject(
           409,
@@ -406,7 +656,7 @@ async function handleSession(req, res, action) {
         );
       }
 
-      // Generate a participant access token.
+      // Generate a token only after access checks succeed.
       const token = await generateLiveKitToken({
         roomName: session.room_name,
         userId: user.id,
@@ -480,8 +730,11 @@ async function handleSession(req, res, action) {
 
       session = result.rows[0];
 
-      // Complete the associated booking.
-      if (type === "one_on_one") {
+      // Complete the private booking if its payment remains valid.
+      if (
+        type === "one_on_one" &&
+        hasValidPrivatePayment(classroom)
+      ) {
         await client.query(
           `
           UPDATE public.bookings

@@ -7,6 +7,14 @@ import Link from "next/link";
 
 const BASE_PATH = "/dashboard/tutor/group-classes";
 
+// Group class pricing rules.
+const MAX_PRICE_CENTS = 1000;
+const MIN_GROUP_CAPACITY = 2;
+const MAX_GROUP_STUDENTS = 20;
+const MAX_GROUP_REVENUE_CENTS = 10000;
+const PLATFORM_COMMISSION_PERCENT = 20;
+
+// Convert a date to the user's local time zone.
 function toLocalDateTime(value) {
   if (!value) return "";
 
@@ -19,6 +27,49 @@ function toLocalDateTime(value) {
   );
 
   return localDate.toISOString().slice(0, 16);
+}
+
+// Convert the entered price to cents.
+function toPriceCents(value) {
+  if (String(value).trim() === "") return null;
+
+  const price = Number(value);
+
+  if (
+    !Number.isFinite(price) ||
+    price < 0 ||
+    price > MAX_PRICE_CENTS / 100
+  ) {
+    return null;
+  }
+
+  const cents = Math.round(price * 100);
+
+  if (Math.abs(price * 100 - cents) > 0.000001) {
+    return null;
+  }
+
+  return cents;
+}
+
+// Calculate the maximum capacity for the selected price.
+function getMaximumGroupStudents(priceCents) {
+  if (priceCents === null || priceCents === 0) {
+    return MAX_GROUP_STUDENTS;
+  }
+
+  return Math.min(
+    MAX_GROUP_STUDENTS,
+    Math.floor(MAX_GROUP_REVENUE_CENTS / priceCents)
+  );
+}
+
+// Format monetary amounts as Canadian dollars.
+function formatCurrency(amountCents) {
+  return (amountCents / 100).toLocaleString("en-CA", {
+    style: "currency",
+    currency: "CAD",
+  });
 }
 
 export default function GroupClassForm({
@@ -45,28 +96,138 @@ export default function GroupClassForm({
   const inputClass =
     "w-full rounded-xl border border-[#dce3ee] bg-white px-4 py-3 text-sm outline-none focus:border-[#26469b] focus:ring-2 focus:ring-[#26469b]/10";
 
+  // Calculate the allowed capacity and estimated earnings.
+  const priceCents = toPriceCents(form.price);
+
+  const allowedMaximum =
+    getMaximumGroupStudents(priceCents);
+
+  const maximumStudents = Number(form.maximumStudents);
+  const minimumStudents = Number(form.minimumStudents);
+
+  const validCapacity =
+    Number.isInteger(maximumStudents) &&
+    maximumStudents >= MIN_GROUP_CAPACITY &&
+    maximumStudents <= allowedMaximum;
+
+  const validMinimum =
+    Number.isInteger(minimumStudents) &&
+    minimumStudents >= 1 &&
+    minimumStudents <= maximumStudents;
+
+  const validPricing =
+    priceCents !== null &&
+    validCapacity &&
+    validMinimum;
+
+  const grossRevenueCents = validPricing
+    ? priceCents * maximumStudents
+    : 0;
+
+  // Commission is calculated per student to match enrollment pricing.
+  const commissionPerStudentCents =
+    priceCents === null
+      ? 0
+      : Math.round(
+          (priceCents * PLATFORM_COMMISSION_PERCENT) / 100
+        );
+
+  const platformCommissionCents = validPricing
+    ? commissionPerStudentCents * maximumStudents
+    : 0;
+
+  const tutorEarningsCents =
+    grossRevenueCents - platformCommissionCents;
+
   function updateField(event) {
     const { name, value } = event.target;
 
-    setForm((previous) => ({
-      ...previous,
-      [name]: value,
-    }));
-  }
+    setError("");
 
-  const grossRevenue =
-    Number(form.price) * Number(form.maximumStudents);
+    setForm((previous) => {
+      const updated = {
+        ...previous,
+        [name]: value,
+      };
+
+      // Reduce the classroom capacity when the price increases.
+      if (name === "price") {
+        const nextPriceCents = toPriceCents(value);
+
+        if (nextPriceCents !== null) {
+          const nextMaximum =
+            getMaximumGroupStudents(nextPriceCents);
+
+          if (
+            Number(updated.maximumStudents) > nextMaximum
+          ) {
+            updated.maximumStudents = nextMaximum;
+          }
+
+          if (
+            Number(updated.minimumStudents) >
+            Number(updated.maximumStudents)
+          ) {
+            updated.minimumStudents =
+              Number(updated.maximumStudents);
+          }
+        }
+      }
+
+      // Keep the minimum student requirement within the capacity.
+      if (name === "maximumStudents") {
+        const nextMaximum = Number(value);
+
+        if (
+          Number.isInteger(nextMaximum) &&
+          nextMaximum >= MIN_GROUP_CAPACITY &&
+          nextMaximum <= getMaximumGroupStudents(
+            toPriceCents(previous.price)
+          ) &&
+          Number(updated.minimumStudents) > nextMaximum
+        ) {
+          updated.minimumStudents = nextMaximum;
+        }
+      }
+
+      return updated;
+    });
+  }
 
   async function handleSubmit(event) {
     event.preventDefault();
     setError("");
 
+    // Validate the participation fee.
+    if (priceCents === null) {
+      setError(
+        "Enter a valid price between $0 and $10 CAD."
+      );
+      return;
+    }
+
+    // Validate the selected classroom capacity.
+    if (!validCapacity) {
+      setError(
+        `Maximum students must be between ${MIN_GROUP_CAPACITY} and ${allowedMaximum} at this price.`
+      );
+      return;
+    }
+
+    if (!validMinimum) {
+      setError(
+        "Minimum students must be between 1 and the maximum capacity."
+      );
+      return;
+    }
+
+    // Ensure potential revenue does not exceed $100.
     if (
-      Number(form.minimumStudents) >
-      Number(form.maximumStudents)
+      priceCents * maximumStudents >
+      MAX_GROUP_REVENUE_CENTS
     ) {
       setError(
-        "Minimum students cannot exceed maximum students."
+        "Potential group class revenue cannot exceed $100 CAD."
       );
       return;
     }
@@ -91,9 +252,9 @@ export default function GroupClassForm({
         educationLevel: form.educationLevel,
         scheduledAt: scheduledDate.toISOString(),
         durationMinutes: Number(form.durationMinutes),
-        priceCents: Math.round(Number(form.price) * 100),
-        minimumStudents: Number(form.minimumStudents),
-        maximumStudents: Number(form.maximumStudents),
+        priceCents,
+        minimumStudents,
+        maximumStudents,
       };
 
       const endpoint = isEditing
@@ -311,17 +472,39 @@ export default function GroupClassForm({
             value={form.price}
             onChange={updateField}
             min="0"
-            max="1000"
+            max={MAX_PRICE_CENTS / 100}
             step="0.01"
             required
             className={inputClass}
           />
 
-          <span className="text-xs text-[#64748b]">
-            Enter 0 for a free class. Paid enrollment
-            is not available yet.
+          <span className="block text-xs text-[#64748b]">
+            Enter a price between $0 and $10 per student.
+            Enter 0 for a free class.
+          </span>
+
+          <span className="block text-xs text-[#64748b]">
+            The maximum potential revenue per class is $100 CAD.
           </span>
         </label>
+
+        {priceCents !== null && (
+          <div className="rounded-xl border border-[#dce6fa] bg-[#f0f4ff] p-4">
+            <p className="text-sm font-bold text-[#26469b]">
+              Allowed classroom capacity
+            </p>
+
+            <p className="mt-1 text-xl font-extrabold text-[#17233d]">
+              Up to {allowedMaximum} students
+            </p>
+
+            <p className="mt-2 text-xs text-[#64748b]">
+              At {formatCurrency(priceCents)} per student,
+              you can accommodate a maximum of {allowedMaximum} students.
+              You can choose a smaller classroom capacity.
+            </p>
+          </div>
+        )}
 
         <div className="grid gap-5 md:grid-cols-2">
           <label className="block space-y-2">
@@ -335,11 +518,19 @@ export default function GroupClassForm({
               value={form.minimumStudents}
               onChange={updateField}
               min="1"
-              max="100"
+              max={
+                validCapacity
+                  ? maximumStudents
+                  : allowedMaximum
+              }
               step="1"
               required
               className={inputClass}
             />
+
+            <span className="text-xs text-[#64748b]">
+              Minimum number of students expected to enroll.
+            </span>
           </label>
 
           <label className="block space-y-2">
@@ -352,12 +543,16 @@ export default function GroupClassForm({
               name="maximumStudents"
               value={form.maximumStudents}
               onChange={updateField}
-              min="2"
-              max="100"
+              min={MIN_GROUP_CAPACITY}
+              max={allowedMaximum}
               step="1"
               required
               className={inputClass}
             />
+
+            <span className="text-xs text-[#64748b]">
+              Select between {MIN_GROUP_CAPACITY} and {allowedMaximum} students.
+            </span>
           </label>
         </div>
 
@@ -366,18 +561,70 @@ export default function GroupClassForm({
             Potential gross revenue at full capacity
           </p>
 
-          <p className="mt-2 text-3xl font-extrabold text-[#17233d]">
-            {grossRevenue.toLocaleString("en-CA", {
-              style: "currency",
-              currency: "CAD",
-            })}
-          </p>
+          {validPricing ? (
+            <>
+              <p className="mt-2 text-3xl font-extrabold text-[#17233d]">
+                {formatCurrency(grossRevenueCents)}
+              </p>
 
-          <p className="mt-2 text-xs text-[#64748b]">
-            Before platform fees, payment fees and taxes.
-            This is an estimate, not guaranteed earnings.
-          </p>
+              <p className="mt-2 text-xs text-[#64748b]">
+                {maximumStudents} students ×{" "}
+                {formatCurrency(priceCents)} per student
+              </p>
+
+              <div className="my-5 border-t border-[#dce6fa]" />
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="rounded-xl border border-[#dce6fa] bg-white p-4">
+                  <p className="text-sm font-bold text-[#64748b]">
+                    Your estimated earnings (80%)
+                  </p>
+
+                  <p className="mt-2 text-2xl font-extrabold text-[#17233d]">
+                    {formatCurrency(tutorEarningsCents)}
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-[#dce6fa] bg-white p-4">
+                  <p className="text-sm font-bold text-[#64748b]">
+                    TuLinkUp commission (20%)
+                  </p>
+
+                  <p className="mt-2 text-2xl font-extrabold text-[#17233d]">
+                    {formatCurrency(platformCommissionCents)}
+                  </p>
+                </div>
+              </div>
+
+              <p className="mt-4 text-xs text-[#64748b]">
+                Estimated earnings are calculated at full
+                classroom capacity before payment processing
+                fees and taxes. Actual earnings depend on
+                paid enrollments. Commission is rounded to
+                the nearest cent for each enrollment.
+              </p>
+            </>
+          ) : (
+            <p className="mt-3 text-sm text-[#64748b]">
+              Enter a valid price and classroom capacity
+              to view your estimated earnings.
+            </p>
+          )}
         </div>
+
+        {priceCents !== null && priceCents > 0 && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+            <p className="text-sm font-bold text-amber-800">
+              Payment integration
+            </p>
+
+            <p className="mt-1 text-xs text-amber-700">
+              You can create a paid group class, but
+              students cannot enroll until online payments
+              become available.
+            </p>
+          </div>
+        )}
 
         <div className="flex flex-wrap justify-end gap-3">
           <Link
@@ -389,7 +636,7 @@ export default function GroupClassForm({
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || !validPricing}
             className="rounded-xl bg-[#26469b] px-6 py-3 text-sm font-bold text-white hover:bg-[#173472] disabled:opacity-50"
           >
             {loading

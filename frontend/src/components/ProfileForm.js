@@ -1,12 +1,13 @@
-
 // Enable client-side interactions in this component.
 "use client";
 
-// Import useState to manage form information and feedback.
 import { useState } from "react";
-
-// Import the router to refresh profile information.
 import { useRouter } from "next/navigation";
+
+// Define the platform pricing rules.
+const MAX_HOURLY_RATE_CENTS = 2500;
+const PLATFORM_COMMISSION_PERCENT = 20;
+const TUTOR_REVENUE_PERCENT = 80;
 
 // Define the default subjects tutors can select.
 const DEFAULT_SUBJECTS = [
@@ -22,6 +23,60 @@ const DEFAULT_SUBJECTS = [
   { id: "Business Studies", name: "Business Studies" },
 ];
 
+// Convert the hourly rate into Canadian cents.
+function toRateCents(value) {
+  if (
+    value == null ||
+    String(value).trim() === ""
+  ) {
+    return null;
+  }
+
+  const amount = Number(value);
+
+  if (
+    !Number.isFinite(amount) ||
+    amount < 0 ||
+    amount > MAX_HOURLY_RATE_CENTS / 100
+  ) {
+    return null;
+  }
+
+  const cents = Math.round(amount * 100);
+
+  if (
+    Math.abs(amount * 100 - cents) > 0.000001
+  ) {
+    return null;
+  }
+
+  return cents;
+}
+
+// Format an amount in Canadian dollars.
+function formatCurrency(cents) {
+  return new Intl.NumberFormat("en-CA", {
+    style: "currency",
+    currency: "CAD",
+  }).format(cents / 100);
+}
+
+// Calculate estimated earnings for a one-hour session.
+function calculateRevenue(hourlyRateCents) {
+  const platformCommissionCents = Math.round(
+    (hourlyRateCents * PLATFORM_COMMISSION_PERCENT) / 100
+  );
+
+  const tutorEarningsCents =
+    hourlyRateCents - platformCommissionCents;
+
+  return {
+    grossAmountCents: hourlyRateCents,
+    platformCommissionCents,
+    tutorEarningsCents,
+  };
+}
+
 // Create a form for students and tutors to update their profiles.
 export function ProfileForm({ user, profile, subjects = [] }) {
   // Initialize the router for refreshing profile information.
@@ -34,6 +89,27 @@ export function ProfileForm({ user, profile, subjects = [] }) {
     error: "",
   });
 
+  const isTutor = user.role === "tutor";
+
+  // Store the tutor's current hourly rate.
+  const [hourlyRate, setHourlyRate] = useState(
+    String(
+      profile?.hourlyRate ??
+      profile?.hourly_rate ??
+      25
+    )
+  );
+
+  // Validate the hourly rate and calculate estimated earnings.
+  const hourlyRateCents = toRateCents(hourlyRate);
+
+  const isValidHourlyRate =
+    hourlyRateCents !== null;
+
+  const revenue = isValidHourlyRate
+    ? calculateRevenue(hourlyRateCents)
+    : null;
+
   // Use subjects from the database or the default subject list.
   const availableSubjects = subjects.length
     ? subjects.map((subject) => ({
@@ -45,7 +121,9 @@ export function ProfileForm({ user, profile, subjects = [] }) {
   // Get the subjects already saved in the tutor's profile.
   const existingSubjects = Array.isArray(profile?.subjects)
     ? profile.subjects.map((subject) =>
-        typeof subject === "string" ? subject : subject.name
+        typeof subject === "string"
+          ? subject
+          : subject.name
       )
     : typeof profile?.subject === "string"
       ? profile.subject
@@ -57,6 +135,17 @@ export function ProfileForm({ user, profile, subjects = [] }) {
   // Store the subjects currently selected by the tutor.
   const [selected, setSelected] = useState(existingSubjects);
 
+  // Update the hourly rate and clear previous feedback.
+  function handleRateChange(event) {
+    setHourlyRate(event.target.value);
+
+    setState((current) => ({
+      ...current,
+      message: "",
+      error: "",
+    }));
+  }
+
   // Handle saving changes to the user's profile.
   async function submit(event) {
     // Prevent the browser from refreshing when the form is submitted.
@@ -66,11 +155,22 @@ export function ProfileForm({ user, profile, subjects = [] }) {
     if (state.loading) return;
 
     // Require tutors to select at least one subject.
-    if (user.role === "tutor" && selected.length === 0) {
+    if (isTutor && selected.length === 0) {
       setState({
         loading: false,
         message: "",
         error: "Choose at least one subject.",
+      });
+      return;
+    }
+
+    // Verify the tutor's hourly rate.
+    if (isTutor && !isValidHourlyRate) {
+      setState({
+        loading: false,
+        message: "",
+        error:
+          "Enter a valid hourly rate between $0 and $25 CAD, with no more than two decimal places.",
       });
       return;
     }
@@ -89,6 +189,14 @@ export function ProfileForm({ user, profile, subjects = [] }) {
       // Add the selected subjects as a JSON string.
       body.set("subjects", JSON.stringify(selected));
 
+      // Send the validated hourly rate in dollars.
+      if (isTutor) {
+        body.set(
+          "hourlyRate",
+          (hourlyRateCents / 100).toFixed(2)
+        );
+      }
+
       // Send the updated profile information to the API.
       const response = await fetch("/api/profile", {
         method: "POST",
@@ -101,7 +209,9 @@ export function ProfileForm({ user, profile, subjects = [] }) {
       // Display an error if the profile cannot be saved.
       if (!response.ok) {
         throw new Error(
-          data.error || "Unable to save profile."
+          data.error ||
+          data.message ||
+          "Unable to save profile."
         );
       }
 
@@ -160,7 +270,7 @@ export function ProfileForm({ user, profile, subjects = [] }) {
       </div>
 
       {/* Display additional profile fields for tutors only. */}
-      {user.role === "tutor" && (
+      {isTutor && (
         <div className="mt-8 border-t border-[#edf0f5] pt-8">
           <h2 className="text-xl font-extrabold">
             Professional tutor profile
@@ -199,22 +309,38 @@ export function ProfileForm({ user, profile, subjects = [] }) {
             {/* Allow tutors to set their hourly teaching rate. */}
             <label>
               <span className="form-label">
-                Hourly rate (CAD)
+                Private tutoring hourly rate (CAD)
               </span>
+
               <input
                 name="hourlyRate"
                 required
                 type="number"
-                min="10"
-                max="500"
+                min="0"
+                max={MAX_HOURLY_RATE_CENTS / 100}
                 step="0.01"
-                defaultValue={
-                  profile?.hourlyRate ??
-                  profile?.hourly_rate ??
-                  40
-                }
+                value={hourlyRate}
+                onChange={handleRateChange}
+                aria-invalid={!isValidHourlyRate}
+                aria-describedby="hourly-rate-help"
                 className="form-input"
+                placeholder="25.00"
               />
+
+              <span
+                id="hourly-rate-help"
+                className="mt-1 block text-xs text-[#71809a]"
+              >
+                Set your rate between $0 and $25 CAD per
+                hour for one-on-one tutoring. Enter $0
+                to offer free tutoring sessions.
+              </span>
+
+              {!isValidHourlyRate && (
+                <span className="mt-1 block text-xs font-semibold text-red-600">
+                  Enter a valid rate between $0 and $25 CAD.
+                </span>
+              )}
             </label>
 
             {/* Display the profile image upload field. */}
@@ -236,6 +362,92 @@ export function ProfileForm({ user, profile, subjects = [] }) {
               </span>
             </label>
           </div>
+
+          {/* Display estimated earnings from private tutoring. */}
+          {revenue && (
+            <section className="mt-6 rounded-xl border border-[#dce3ee] bg-[#f7f9fd] p-5">
+              <h3 className="text-lg font-extrabold text-[#173472]">
+                Estimated Private Tutoring Earnings
+              </h3>
+
+              <p className="mt-2 text-sm leading-6 text-[#64748b]">
+                Review how your hourly rate is shared between
+                you and TuLinkUp for a one-hour private
+                tutoring session.
+              </p>
+
+              <div className="mt-5 grid gap-4 sm:grid-cols-3">
+                <div className="rounded-xl border border-[#dce3ee] bg-white p-4">
+                  <p className="text-xs font-bold uppercase text-[#8190a8]">
+                    Student pays
+                  </p>
+
+                  <p className="mt-2 text-2xl font-extrabold text-[#173472]">
+                    {formatCurrency(
+                      revenue.grossAmountCents
+                    )}
+                  </p>
+
+                  <p className="mt-1 text-xs text-[#64748b]">
+                    CAD per hour
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-green-200 bg-green-50 p-4">
+                  <p className="text-xs font-bold uppercase text-green-700">
+                    Your earnings
+                  </p>
+
+                  <p className="mt-2 text-2xl font-extrabold text-green-700">
+                    {formatCurrency(
+                      revenue.tutorEarningsCents
+                    )}
+                  </p>
+
+                  <p className="mt-1 text-xs text-green-700">
+                    {TUTOR_REVENUE_PERCENT}% tutor share
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+                  <p className="text-xs font-bold uppercase text-[#26469b]">
+                    TuLinkUp commission
+                  </p>
+
+                  <p className="mt-2 text-2xl font-extrabold text-[#26469b]">
+                    {formatCurrency(
+                      revenue.platformCommissionCents
+                    )}
+                  </p>
+
+                  <p className="mt-1 text-xs text-[#26469b]">
+                    {PLATFORM_COMMISSION_PERCENT}% platform fee
+                  </p>
+                </div>
+              </div>
+
+              {hourlyRateCents === 0 ? (
+                <p className="mt-4 rounded-xl bg-green-100 p-3 text-sm font-semibold text-green-700">
+                  You are offering free private tutoring.
+                  Students will not be charged, and TuLinkUp
+                  will not collect a commission.
+                </p>
+              ) : (
+                <p className="mt-4 text-xs leading-5 text-[#64748b]">
+                  These are estimated earnings before any
+                  applicable payment processing fees or taxes.
+                  Amounts are rounded to the nearest cent.
+                  Actual earnings depend on the booked
+                  session duration.
+                </p>
+              )}
+
+              <p className="mt-3 text-xs font-semibold text-[#26469b]">
+                Online payments and tutor payouts are
+                coming soon.
+              </p>
+            </section>
+          )}
 
           {/* Allow tutors to write a professional biography. */}
           <label className="mt-5 block">
@@ -301,11 +513,7 @@ export function ProfileForm({ user, profile, subjects = [] }) {
                 <button
                   key={subject.id}
                   type="button"
-
-                  // Indicate whether the subject is selected.
                   aria-pressed={selected.includes(subject.name)}
-
-                  // Add or remove the subject when clicked.
                   onClick={() =>
                     setSelected((current) =>
                       current.includes(subject.name)
@@ -315,8 +523,6 @@ export function ProfileForm({ user, profile, subjects = [] }) {
                         : [...current, subject.name]
                     )
                   }
-
-                  // Highlight subjects that are currently selected.
                   className={`rounded-full border px-4 py-2 text-sm font-bold ${
                     selected.includes(subject.name)
                       ? "border-[#26469b] bg-[#26469b] text-white"
@@ -355,10 +561,12 @@ export function ProfileForm({ user, profile, subjects = [] }) {
       <div className="mt-7 flex justify-end">
         <button
           type="submit"
-          disabled={state.loading}
-          className="btn-primary px-7"
+          disabled={
+            state.loading ||
+            (isTutor && !isValidHourlyRate)
+          }
+          className="btn-primary px-7 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {/* Show saving progress while the request is processing. */}
           {state.loading ? "Saving…" : "Save changes"}
         </button>
       </div>

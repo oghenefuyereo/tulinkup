@@ -3,6 +3,52 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
+const MAX_GROUP_PRICE_CENTS = 1000;
+const MAX_GROUP_STUDENTS = 20;
+const MAX_GROUP_REVENUE_CENTS = 10000;
+const MIN_GROUP_CAPACITY = 2;
+
+function formatCurrency(cents) {
+  return new Intl.NumberFormat("en-CA", {
+    style: "currency",
+    currency: "CAD",
+  }).format(Number(cents) / 100);
+}
+
+// Check whether the class follows the platform pricing rules.
+function hasValidClassPricing(groupClass) {
+  if (!groupClass || groupClass.price_cents == null) {
+    return false;
+  }
+
+  const priceCents = Number(groupClass.price_cents);
+  const capacity = Number(groupClass.maximum_students);
+  const minimumStudents = Number(groupClass.minimum_students);
+
+  return (
+    Number.isInteger(priceCents) &&
+    priceCents >= 0 &&
+    priceCents <= MAX_GROUP_PRICE_CENTS &&
+    Number.isInteger(capacity) &&
+    capacity >= MIN_GROUP_CAPACITY &&
+    capacity <= MAX_GROUP_STUDENTS &&
+    Number.isInteger(minimumStudents) &&
+    minimumStudents >= 1 &&
+    minimumStudents <= capacity &&
+    priceCents * capacity <= MAX_GROUP_REVENUE_CENTS &&
+    groupClass.currency === "CAD"
+  );
+}
+
+// Retrieve the agreed price from the enrolment record.
+function getEnrollmentPrice(enrollment, groupClass) {
+  return Number(
+    enrollment?.enrollment_price_cents ??
+      enrollment?.price_cents ??
+      groupClass.price_cents
+  );
+}
+
 export default function GroupClassDetails({ classId }) {
   const [groupClass, setGroupClass] = useState(null);
   const [user, setUser] = useState(null);
@@ -19,6 +65,11 @@ export default function GroupClassDetails({ classId }) {
     const controller = new AbortController();
 
     async function loadDetails() {
+      setLoading(true);
+      setError("");
+      setSuccess("");
+      setEnrollmentError("");
+
       try {
         const [classResponse, userResponse] =
           await Promise.all([
@@ -128,11 +179,64 @@ export default function GroupClassDetails({ classId }) {
     if (
       processing ||
       enrolled ||
+      enrollmentError ||
       user?.role !== "student" ||
-      groupClass?.status !== "published" ||
-      Number(groupClass.price_cents) !== 0 ||
+      !groupClass ||
+      groupClass.status !== "published" ||
       new Date(groupClass.scheduled_at) <= new Date()
     ) {
+      return;
+    }
+
+    // Verify the class pricing and capacity.
+    if (!hasValidClassPricing(groupClass)) {
+      setEnrollmentError(
+        "This class does not meet the platform pricing requirements."
+      );
+      return;
+    }
+
+    // Paid enrolments require payment integration.
+    if (Number(groupClass.price_cents) !== 0) {
+      setEnrollmentError(
+        "Paid enrolment is not available yet."
+      );
+      return;
+    }
+
+    // Prevent enrolment when the class is full.
+    if (
+      Number(groupClass.enrolled_students || 0) >=
+      Number(groupClass.maximum_students)
+    ) {
+      setEnrollmentError("This group class is full.");
+      return;
+    }
+
+    // Prevent duplicate or ineligible enrolments.
+    if (
+      enrollment &&
+      enrollment.enrollment_status !== "cancelled"
+    ) {
+      setEnrollmentError(
+        "An enrolment already exists for this class."
+      );
+      return;
+    }
+
+    // Verify that a cancelled enrolment can be reactivated.
+    if (
+      enrollment?.enrollment_status === "cancelled" &&
+      (
+        Number(enrollment.amount_paid_cents) !== 0 ||
+        !["not_required", "unpaid", "failed"].includes(
+          enrollment.payment_status
+        )
+      )
+    ) {
+      setEnrollmentError(
+        "Your previous enrolment requires payment review."
+      );
       return;
     }
 
@@ -225,7 +329,12 @@ export default function GroupClassDetails({ classId }) {
 
   const isFull = remaining === 0;
 
-  const isFree = Number(groupClass.price_cents) === 0;
+  const priceCents = Number(groupClass.price_cents);
+
+  const isFree = priceCents === 0;
+
+  const pricingIsValid =
+    hasValidClassPricing(groupClass);
 
   // Identify the current classroom status.
   const isLive = groupClass.status === "live";
@@ -237,17 +346,35 @@ export default function GroupClassDetails({ classId }) {
   const isConfirmed =
     enrollment?.enrollment_status === "confirmed";
 
+  // Use the agreed enrolment price for existing students.
+  const enrollmentPriceCents = getEnrollmentPrice(
+    enrollment,
+    groupClass
+  );
+
+  const enrollmentCurrency =
+    enrollment?.enrollment_currency ??
+    enrollment?.currency ??
+    groupClass.currency;
+
   // Verify the student's payment eligibility.
   const hasValidPayment =
+    Boolean(enrollment) &&
+    enrollmentCurrency === "CAD" &&
+    Number.isInteger(enrollmentPriceCents) &&
+    enrollmentPriceCents >= 0 &&
+    enrollmentPriceCents <= MAX_GROUP_PRICE_CENTS &&
     (
-      isFree &&
-      enrollment?.payment_status === "not_required"
-    ) ||
-    (
-      Number(groupClass.price_cents) > 0 &&
-      enrollment?.payment_status === "paid" &&
-      Number(enrollment.amount_paid_cents) >=
-        Number(groupClass.price_cents)
+      (
+        enrollmentPriceCents === 0 &&
+        enrollment.payment_status === "not_required"
+      ) ||
+      (
+        enrollmentPriceCents > 0 &&
+        enrollment.payment_status === "paid" &&
+        Number(enrollment.amount_paid_cents) >=
+          enrollmentPriceCents
+      )
     );
 
   // Determine whether the student can join the live classroom.
@@ -269,6 +396,7 @@ export default function GroupClassDetails({ classId }) {
   // Identify cancelled enrolments eligible for re-enrolment.
   const canReEnroll =
     enrollment?.enrollment_status === "cancelled" &&
+    pricingIsValid &&
     isFree &&
     Number(enrollment.amount_paid_cents) === 0 &&
     ["not_required", "unpaid", "failed"].includes(
@@ -281,10 +409,7 @@ export default function GroupClassDetails({ classId }) {
 
   const isPast = scheduledDate <= new Date();
 
-  const price = new Intl.NumberFormat("en-CA", {
-    style: "currency",
-    currency: "CAD",
-  }).format(Number(groupClass.price_cents) / 100);
+  const price = formatCurrency(priceCents);
 
   const percentage =
     capacity > 0
@@ -463,7 +588,50 @@ export default function GroupClassDetails({ classId }) {
               <p className="mt-2 text-4xl font-extrabold text-[#173472]">
                 {isFree ? "Free" : `${price} CAD`}
               </p>
+
+              <p className="mt-2 text-xs text-[#64748b]">
+                {isFree
+                  ? "No payment is required for this session."
+                  : "One-time price for the entire live session."}
+              </p>
             </div>
+
+            {/* Display the student's agreed enrolment price. */}
+            {enrollment &&
+              enrollment.enrollment_status !== "cancelled" &&
+              (
+                enrollment.enrollment_price_cents != null ||
+                enrollment.price_cents != null
+              ) && (
+                <div className="rounded-xl bg-[#f7f9fd] p-4">
+                  <div className="flex justify-between gap-3 text-sm">
+                    <span className="text-[#64748b]">
+                      Your enrolment price
+                    </span>
+
+                    <span className="font-bold text-[#173472]">
+                      {enrollmentPriceCents === 0
+                        ? "Free"
+                        : `${formatCurrency(
+                            enrollmentPriceCents
+                          )} CAD`}
+                    </span>
+                  </div>
+
+                  <div className="mt-3 flex justify-between gap-3 text-sm">
+                    <span className="text-[#64748b]">
+                      Payment status
+                    </span>
+
+                    <span className="font-bold capitalize">
+                      {enrollment.payment_status === "not_required"
+                        ? "Not required"
+                        : enrollment.payment_status
+                            ?.replaceAll("_", " ") || "Unknown"}
+                    </span>
+                  </div>
+                </div>
+              )}
 
             <hr className="border-[#edf0f5]" />
 
@@ -532,7 +700,17 @@ export default function GroupClassDetails({ classId }) {
                 </span>
               </div>
 
-              <div className="h-2 overflow-hidden rounded-full bg-[#edf0f5]">
+              <div
+                className="h-2 overflow-hidden rounded-full bg-[#edf0f5]"
+                role="progressbar"
+                aria-label="Class capacity"
+                aria-valuemin={0}
+                aria-valuemax={capacity || 1}
+                aria-valuenow={Math.max(
+                  0,
+                  Math.min(totalEnrolled, capacity)
+                )}
+              >
                 <div
                   className="h-full rounded-full bg-[#26469b]"
                   style={{
@@ -541,6 +719,18 @@ export default function GroupClassDetails({ classId }) {
                 />
               </div>
             </div>
+
+            {!pricingIsValid &&
+              !isCancelled &&
+              !isCompleted && (
+                <p
+                  role="alert"
+                  className="rounded-xl bg-amber-50 p-3 text-sm text-amber-700"
+                >
+                  This class requires a pricing review before
+                  accepting new enrolments.
+                </p>
+              )}
 
             {enrollmentError && (
               <p
@@ -589,13 +779,12 @@ export default function GroupClassDetails({ classId }) {
                 )}
 
                 {/* Display outstanding payment requirements. */}
-                {isConfirmed &&
-                  !hasValidPayment && (
-                    <p className="rounded-xl bg-amber-50 p-3 text-center text-xs font-semibold text-amber-700">
-                      Your payment or enrolment details must
-                      be verified before joining the classroom.
-                    </p>
-                  )}
+                {isConfirmed && !hasValidPayment && (
+                  <p className="rounded-xl bg-amber-50 p-3 text-center text-xs font-semibold text-amber-700">
+                    Your payment or enrolment details must
+                    be verified before joining the classroom.
+                  </p>
+                )}
 
                 {/* Display classroom eligibility information. */}
                 {!isConfirmed && (
@@ -632,6 +821,10 @@ export default function GroupClassDetails({ classId }) {
               <p className="rounded-xl bg-gray-100 p-4 text-center text-sm font-bold">
                 This class has already started or passed.
               </p>
+            ) : !pricingIsValid ? (
+              <p className="rounded-xl bg-gray-100 p-4 text-center text-sm font-bold">
+                Enrolment is temporarily unavailable.
+              </p>
             ) : isFull ? (
               <p className="rounded-xl bg-gray-100 p-4 text-center text-sm font-bold">
                 This class is full.
@@ -647,14 +840,21 @@ export default function GroupClassDetails({ classId }) {
               <p className="rounded-xl bg-gray-100 p-4 text-center text-sm">
                 Only student accounts can enrol.
               </p>
-            ) : !isFree ? (
-              <div className="rounded-xl bg-[#f0f4ff] p-4 text-center text-sm text-[#26469b]">
-                Paid enrolment is coming soon.
-              </div>
             ) : enrollment?.enrollment_status === "pending" ? (
               <p className="rounded-xl bg-amber-50 p-4 text-center text-sm font-bold text-amber-700">
                 Your enrolment is pending confirmation.
               </p>
+            ) : !isFree ? (
+              <div className="rounded-xl bg-[#f0f4ff] p-4 text-center text-sm text-[#26469b]">
+                <p className="font-bold">
+                  Paid enrolment is coming soon.
+                </p>
+
+                <p className="mt-2 text-xs">
+                  Online payments are not available yet.
+                  Please explore our free group classes.
+                </p>
+              </div>
             ) : enrollment?.enrollment_status === "cancelled" &&
               !canReEnroll ? (
               <p className="rounded-xl bg-gray-100 p-4 text-center text-sm font-bold">

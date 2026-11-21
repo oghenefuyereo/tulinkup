@@ -1,4 +1,3 @@
-
 // Import Image to display tutor profile pictures.
 import Image from "next/image";
 
@@ -7,6 +6,48 @@ import Link from "next/link";
 
 // Import the reusable icons used in the tutor card.
 import { Icon } from "./Icons";
+
+// Define the maximum hourly teaching rate in cents.
+const MAX_HOURLY_RATE_CENTS = 2500;
+
+// Validate and convert the tutor's hourly rate into cents.
+function getHourlyRateCents(value) {
+  if (
+    value == null ||
+    !["number", "string"].includes(typeof value) ||
+    String(value).trim() === ""
+  ) {
+    return null;
+  }
+
+  const rate = Number(value);
+
+  if (
+    !Number.isFinite(rate) ||
+    rate < 0 ||
+    rate > MAX_HOURLY_RATE_CENTS / 100
+  ) {
+    return null;
+  }
+
+  const cents = Math.round(rate * 100);
+
+  if (Math.abs(rate * 100 - cents) > 0.000001) {
+    return null;
+  }
+
+  return cents;
+}
+
+// Format the hourly rate in Canadian dollars.
+function formatCurrency(cents) {
+  return new Intl.NumberFormat("en-CA", {
+    style: "currency",
+    currency: "CAD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(cents / 100);
+}
 
 // Create a reusable card to display a tutor's information.
 export function TutorCard({ tutor }) {
@@ -38,10 +79,17 @@ export function TutorCard({ tutor }) {
         }
       : null;
 
-  // Get the tutor's hourly teaching rate.
-  const hourlyRate = Number(
-    tutor.hourlyRate ?? tutor.hourly_rate ?? 0
+  // Get and validate the tutor's hourly teaching rate.
+  const hourlyRateCents = getHourlyRateCents(
+    tutor.hourlyRate ?? tutor.hourly_rate
   );
+
+  // Check whether the tutor has valid pricing.
+  const hasValidRate = hourlyRateCents !== null;
+
+  // Check whether the tutor offers free tutoring.
+  const isFree =
+    hasValidRate && hourlyRateCents === 0;
 
   // Get the tutor's rating if one exists.
   const rating =
@@ -153,7 +201,7 @@ export function TutorCard({ tutor }) {
         </p>
 
         {/* Display the tutor's rating and hourly rate. */}
-        <div className="mt-5 flex items-center justify-between border-t border-[#edf0f5] pt-4">
+        <div className="mt-5 flex items-center justify-between gap-3 border-t border-[#edf0f5] pt-4">
           {/* Display the tutor's rating and number of reviews. */}
           <div className="flex items-center gap-1.5 text-sm">
             {/* Show rating information only when a valid rating exists. */}
@@ -185,15 +233,52 @@ export function TutorCard({ tutor }) {
 
           {/* Display the tutor's hourly teaching rate. */}
           <div className="text-right">
-            <span className="text-xl font-extrabold text-[#173472]">
-              ${hourlyRate.toFixed(2)}
-            </span>
+            {!hasValidRate ? (
+              <span className="text-sm font-bold text-[#7c879b]">
+                Rate unavailable
+              </span>
+            ) : isFree ? (
+              <>
+                <span className="text-xl font-extrabold text-[#118447]">
+                  Free
+                </span>
 
-            <span className="text-sm text-[#7c879b]">
-              {" "}/hr
-            </span>
+                <p className="mt-1 text-xs text-[#7c879b]">
+                  No payment required
+                </p>
+              </>
+            ) : (
+              <>
+                <span className="text-xl font-extrabold text-[#173472]">
+                  {formatCurrency(hourlyRateCents)}
+                </span>
+
+                <span className="text-sm text-[#7c879b]">
+                  {" "}CAD /hr
+                </span>
+              </>
+            )}
           </div>
         </div>
+
+        {/* Display the tutoring session type. */}
+        <p className="mt-3 text-xs text-[#7c879b]">
+          One-on-one tutoring
+        </p>
+
+        {/* Inform students when paid bookings are unavailable. */}
+        {hasValidRate && !isFree && (
+          <p className="mt-3 rounded-lg bg-[#fff7dc] p-2.5 text-xs font-medium text-[#9f7500]">
+            Paid bookings are coming soon.
+          </p>
+        )}
+
+        {/* Inform students when the tutor has no valid pricing. */}
+        {!hasValidRate && (
+          <p className="mt-3 rounded-lg bg-[#fff7dc] p-2.5 text-xs font-medium text-[#9f7500]">
+            This tutor has not configured a valid hourly rate.
+          </p>
+        )}
 
         {/* Link to the tutor's full profile page. */}
         <Link

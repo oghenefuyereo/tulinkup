@@ -1,15 +1,82 @@
-
 // Import the database connection to retrieve tutor information.
 const pool = require("../config/db");
 
+// Import the platform pricing configuration.
+const {
+  getPricingConfig,
+  validatePrivatePricing,
+} = require("../utils/pricing");
+
+// Validate and convert the tutor's hourly rate into cents.
+function getHourlyRateCents(value, pricing) {
+  if (
+    value == null ||
+    !["number", "string"].includes(typeof value) ||
+    String(value).trim() === ""
+  ) {
+    return null;
+  }
+
+  const rate = Number(value);
+
+  if (
+    !Number.isFinite(rate) ||
+    rate < pricing.MIN_PRIVATE_HOURLY_RATE_CENTS / 100 ||
+    rate > pricing.MAX_PRIVATE_HOURLY_RATE_CENTS / 100
+  ) {
+    return null;
+  }
+
+  const cents = Math.round(rate * 100);
+
+  if (Math.abs(rate * 100 - cents) > 0.000001) {
+    return null;
+  }
+
+  try {
+    validatePrivatePricing(cents, pricing);
+
+    return cents;
+  } catch {
+    return null;
+  }
+}
+
+// Prepare the tutor's pricing information.
+function formatPricing(value, pricing) {
+  const hourlyRateCents = getHourlyRateCents(
+    value,
+    pricing
+  );
+
+  return {
+    hourlyRate:
+      hourlyRateCents === null
+        ? null
+        : hourlyRateCents / 100,
+
+    hourlyRateCents,
+
+    currency: pricing.CURRENCY,
+
+    isFree: hourlyRateCents === 0,
+  };
+}
+
 // Format tutor information so the frontend can display it easily.
-function formatTutor(row) {
+function formatTutor(row, pricingConfig) {
   // Turn the tutor's subjects into a list of subject objects.
   const subjects = String(row.subject || "")
     .split(",")
     .map((name) => name.trim())
     .filter(Boolean)
     .map((name) => ({ id: name, name }));
+
+  // Prepare the tutor's hourly pricing information.
+  const pricing = formatPricing(
+    row.hourly_rate,
+    pricingConfig
+  );
 
   // Organize the tutor's details into a consistent format.
   return {
@@ -22,7 +89,9 @@ function formatTutor(row) {
     biography: row.bio || "",
     qualifications: row.qualifications || "",
     experience: row.experience || "",
-    hourlyRate: Number(row.hourly_rate || 0),
+
+    ...pricing,
+
     subjects,
     image: row.profile_image_url
       ? {
@@ -30,6 +99,7 @@ function formatTutor(row) {
           alt: `${row.full_name}, tutor profile`,
         }
       : null,
+
     verified: false,
     rating: null,
     reviewCount: 0,
@@ -112,13 +182,28 @@ async function getMyTutorProfile(req, res) {
     // Get the tutor's information from the database result.
     const row = result.rows[0];
 
-    // Return the profile with formatted subjects and hourly rate.
+    // Retrieve the current platform pricing configuration.
+    const pricingConfig = await getPricingConfig();
+
+    // Prepare the tutor's hourly pricing information.
+    const pricing = formatPricing(
+      row.hourly_rate,
+      pricingConfig
+    );
+
+    // Return the profile with formatted subjects and pricing.
     return res.json({
       success: true,
       profile: {
         ...row,
+
         biography: row.bio || "",
-        hourlyRate: Number(row.hourly_rate || 0),
+
+        ...pricing,
+
+        // Keep both hourly rate fields consistent.
+        hourly_rate: pricing.hourlyRate,
+
         subjects: String(row.subject || "")
           .split(",")
           .map((name) => name.trim())
@@ -146,14 +231,20 @@ async function getTutors(req, res) {
        LIMIT 100`
     );
 
+    // Retrieve the current platform pricing configuration.
+    const pricingConfig = await getPricingConfig();
+
     // Format each tutor's details and create a unique profile URL.
     const tutors = result.rows.map((row) => ({
-      ...formatTutor(row),
+      ...formatTutor(row, pricingConfig),
       slug: makeSlug(row.full_name, row.user_id),
     }));
 
     // Send the tutor list back to the frontend.
-    return res.json({ success: true, tutors });
+    return res.json({
+      success: true,
+      tutors,
+    });
   } catch (error) {
     // Log any errors that happen while retrieving tutors.
     console.error("Get tutors error:", error);
@@ -188,14 +279,20 @@ async function findTutorBySlug(slug) {
   const row = result.rows[0];
 
   // Generate the correct slug using the tutor's current name.
-  const canonicalSlug = makeSlug(row.full_name, row.user_id);
+  const canonicalSlug = makeSlug(
+    row.full_name,
+    row.user_id
+  );
 
   // Reject the request if the slug does not match the tutor's current URL.
   if (canonicalSlug !== slug) return null;
 
+  // Retrieve the current platform pricing configuration.
+  const pricingConfig = await getPricingConfig();
+
   // Return the tutor's formatted profile information.
   return {
-    ...formatTutor(row),
+    ...formatTutor(row, pricingConfig),
     slug: canonicalSlug,
   };
 }
@@ -204,7 +301,9 @@ async function findTutorBySlug(slug) {
 async function getTutorBySlug(req, res) {
   try {
     // Find the tutor using the slug provided in the URL.
-    const tutor = await findTutorBySlug(req.params.slug);
+    const tutor = await findTutorBySlug(
+      req.params.slug
+    );
 
     // Return an error if the tutor cannot be found.
     if (!tutor) {
@@ -232,7 +331,9 @@ async function getTutorBySlug(req, res) {
 async function getTutorExtras(req, res) {
   try {
     // Find the tutor using their profile URL.
-    const tutor = await findTutorBySlug(req.params.slug);
+    const tutor = await findTutorBySlug(
+      req.params.slug
+    );
 
     // Stop if the tutor does not exist.
     if (!tutor) {
@@ -241,11 +342,9 @@ async function getTutorExtras(req, res) {
       });
     }
 
-    // Reviews are not implemented in the current schema.
+    // Keep reviews empty until review integration is implemented.
     const reviews = [];
-    let availability = [];
 
-    // Requires the tutor_availability migration.
     // Get the tutor's upcoming availability, limited to 20 slots.
     const result = await pool.query(
       `SELECT
@@ -262,7 +361,7 @@ async function getTutorExtras(req, res) {
     );
 
     // Convert the availability IDs into strings for the frontend.
-    availability = result.rows.map((slot) => ({
+    const availability = result.rows.map((slot) => ({
       ...slot,
       id: String(slot.id),
     }));

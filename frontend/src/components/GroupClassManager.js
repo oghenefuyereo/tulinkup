@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useEffect, useState } from "react";
@@ -5,6 +6,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 const BASE_PATH = "/dashboard/tutor/group-classes";
+
+const PLATFORM_COMMISSION_PERCENT = 20;
+const MAX_GROUP_PRICE_CENTS = 1000;
+const MAX_GROUP_STUDENTS = 20;
+const MAX_GROUP_REVENUE_CENTS = 10000;
 
 const statusStyles = {
   draft: "bg-gray-100 text-gray-700",
@@ -26,6 +32,51 @@ function formatDate(value) {
     dateStyle: "medium",
     timeStyle: "short",
   });
+}
+
+// Check whether a class follows the platform pricing rules.
+function isValidGroupPricing(item) {
+  const priceCents = Number(item.price_cents);
+  const capacity = Number(item.maximum_students);
+  const minimumStudents = Number(item.minimum_students);
+
+  return (
+    item.price_cents != null &&
+    Number.isInteger(priceCents) &&
+    priceCents >= 0 &&
+    priceCents <= MAX_GROUP_PRICE_CENTS &&
+    Number.isInteger(capacity) &&
+    capacity >= 2 &&
+    capacity <= MAX_GROUP_STUDENTS &&
+    Number.isInteger(minimumStudents) &&
+    minimumStudents >= 1 &&
+    minimumStudents <= capacity &&
+    priceCents * capacity <= MAX_GROUP_REVENUE_CENTS
+  );
+}
+
+// Calculate estimated earnings at full classroom capacity.
+function calculateClassRevenue(item) {
+  const priceCents = Number(item.price_cents || 0);
+  const capacity = Number(item.maximum_students || 0);
+
+  const grossRevenue = priceCents * capacity;
+
+  const commissionPerStudent = Math.round(
+    (priceCents * PLATFORM_COMMISSION_PERCENT) / 100
+  );
+
+  const platformCommission =
+    commissionPerStudent * capacity;
+
+  const tutorEarnings =
+    grossRevenue - platformCommission;
+
+  return {
+    grossRevenue,
+    platformCommission,
+    tutorEarnings,
+  };
 }
 
 export default function GroupClassManager() {
@@ -83,6 +134,22 @@ export default function GroupClassManager() {
   async function updateStatus(id, status) {
     if (processingId !== null) return;
 
+    setError("");
+    setSuccess("");
+
+    if (status === "published") {
+      const groupClass = classes.find(
+        (item) => item.id === id
+      );
+
+      if (!groupClass || !isValidGroupPricing(groupClass)) {
+        setError(
+          "Update the class pricing and capacity before publishing."
+        );
+        return;
+      }
+    }
+
     if (status === "cancelled") {
       const confirmed = window.confirm(
         "Are you sure you want to cancel this class?"
@@ -92,8 +159,6 @@ export default function GroupClassManager() {
     }
 
     setProcessingId(id);
-    setError("");
-    setSuccess("");
 
     try {
       const response = await fetch(
@@ -201,7 +266,6 @@ export default function GroupClassManager() {
         )
       );
 
-      // Display a success message.
       setSuccess(
         data.message ||
           "Your live class has ended successfully."
@@ -228,13 +292,33 @@ export default function GroupClassManager() {
     0
   );
 
-  const potentialRevenue = publishedClasses.reduce(
-    (total, item) =>
-      total +
-      Number(item.price_cents || 0) *
-        Number(item.maximum_students || 0),
-    0
-  );
+  // Calculate potential revenue for valid upcoming published classes.
+  const revenueTotals = publishedClasses
+    .filter(
+      (item) =>
+        isValidGroupPricing(item) &&
+        new Date(item.scheduled_at) > new Date()
+    )
+    .reduce(
+      (total, item) => {
+        const revenue = calculateClassRevenue(item);
+
+        return {
+          grossRevenue:
+            total.grossRevenue + revenue.grossRevenue,
+          platformCommission:
+            total.platformCommission +
+            revenue.platformCommission,
+          tutorEarnings:
+            total.tutorEarnings + revenue.tutorEarnings,
+        };
+      },
+      {
+        grossRevenue: 0,
+        platformCommission: 0,
+        tutorEarnings: 0,
+      }
+    );
 
   const statistics = [
     {
@@ -336,13 +420,47 @@ export default function GroupClassManager() {
             </p>
 
             <p className="mt-2 text-3xl font-extrabold text-[#17233d]">
-              {formatCurrency(potentialRevenue)}
+              {formatCurrency(revenueTotals.grossRevenue)}
+            </p>
+
+            <div className="my-5 border-t border-[#dce6fa]" />
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="rounded-xl border border-[#dce6fa] bg-white p-4">
+                <p className="text-sm font-bold text-[#64748b]">
+                  Your estimated earnings (80%)
+                </p>
+
+                <p className="mt-2 text-2xl font-extrabold text-[#17233d]">
+                  {formatCurrency(
+                    revenueTotals.tutorEarnings
+                  )}
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-[#dce6fa] bg-white p-4">
+                <p className="text-sm font-bold text-[#64748b]">
+                  TuLinkUp commission (20%)
+                </p>
+
+                <p className="mt-2 text-2xl font-extrabold text-[#17233d]">
+                  {formatCurrency(
+                    revenueTotals.platformCommission
+                  )}
+                </p>
+              </div>
+            </div>
+
+            <p className="mt-4 text-xs text-[#64748b]">
+              Estimated revenue if all eligible upcoming
+              published classes reach full capacity.
+              These amounts are not actual earnings and
+              exclude payment processing fees and taxes.
+              Commission is rounded per enrolment.
             </p>
 
             <p className="mt-2 text-xs text-[#64748b]">
-              Estimated revenue if all published classes
-              reach full capacity. Payments are not
-              enabled yet.
+              Online payments are not enabled yet.
             </p>
           </div>
 
@@ -418,6 +536,18 @@ export default function GroupClassManager() {
                         (enrolled / capacity) * 100
                       )
                     : 0;
+
+                const validPricing =
+                  isValidGroupPricing(item);
+
+                const revenue =
+                  calculateClassRevenue(item);
+
+                const showRevenue =
+                  validPricing &&
+                  ["draft", "published", "live"].includes(
+                    item.status
+                  );
 
                 return (
                   <article
@@ -499,7 +629,9 @@ export default function GroupClassManager() {
                         <span className="text-[#64748b]">
                           {item.status === "cancelled"
                             ? "Class cancelled"
-                            : `${remaining} seats remaining`}
+                            : item.status === "completed"
+                              ? "Class completed"
+                              : `${remaining} seats remaining`}
                         </span>
                       </div>
 
@@ -511,7 +643,90 @@ export default function GroupClassManager() {
                           }}
                         />
                       </div>
+
+                      <p className="text-xs text-[#64748b]">
+                        Minimum students:{" "}
+                        {item.minimum_students}
+                      </p>
                     </div>
+
+                    {/* Estimated class earnings */}
+                    {showRevenue && (
+                      <div className="rounded-xl border border-[#dce6fa] bg-[#f0f4ff] p-4">
+                        <p className="text-sm font-bold text-[#26469b]">
+                          Estimated earnings at full capacity
+                        </p>
+
+                        <div className="mt-4 grid gap-4 sm:grid-cols-3">
+                          <div>
+                            <p className="text-xs font-bold text-[#64748b]">
+                              GROSS REVENUE
+                            </p>
+
+                            <p className="mt-1 text-xl font-extrabold text-[#17233d]">
+                              {formatCurrency(
+                                revenue.grossRevenue
+                              )}
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-xs font-bold text-[#64748b]">
+                              YOUR EARNINGS (80%)
+                            </p>
+
+                            <p className="mt-1 text-xl font-extrabold text-[#17233d]">
+                              {formatCurrency(
+                                revenue.tutorEarnings
+                              )}
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-xs font-bold text-[#64748b]">
+                              TULINKUP COMMISSION (20%)
+                            </p>
+
+                            <p className="mt-1 text-xl font-extrabold text-[#17233d]">
+                              {formatCurrency(
+                                revenue.platformCommission
+                              )}
+                            </p>
+                          </div>
+                        </div>
+
+                        <p className="mt-3 text-xs text-[#64748b]">
+                          {capacity} students ×{" "}
+                          {formatCurrency(item.price_cents)}
+                          {" "}per student. Estimated amounts
+                          before payment fees and taxes.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Warn tutors about invalid draft pricing. */}
+                    {!validPricing &&
+                      item.status === "draft" && (
+                        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                          Update your class pricing before
+                          publishing. Group classes must
+                          charge no more than $10 per student,
+                          accommodate between 2 and 20
+                          students, and have a maximum
+                          potential revenue of $100 CAD.
+                        </div>
+                      )}
+
+                    {/* Payment availability */}
+                    {Number(item.price_cents) > 0 &&
+                      ["draft", "published"].includes(
+                        item.status
+                      ) && (
+                        <p className="text-xs text-amber-700">
+                          Paid enrolment will become available
+                          after payment integration is enabled.
+                        </p>
+                      )}
 
                     {/* Class actions */}
                     <div className="flex flex-wrap gap-3 border-t border-[#edf0f5] pt-4">
@@ -562,7 +777,10 @@ export default function GroupClassManager() {
 
                           <button
                             type="button"
-                            disabled={processingId !== null}
+                            disabled={
+                              processingId !== null ||
+                              !validPricing
+                            }
                             onClick={() =>
                               updateStatus(
                                 item.id,

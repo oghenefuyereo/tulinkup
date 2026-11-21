@@ -1,4 +1,3 @@
-
 "use client";
 
 import Link from "next/link";
@@ -16,12 +15,14 @@ export default function GroupClassCard({ groupClass }) {
 
   const isFull = remaining === 0;
 
-  const isFree = Number(groupClass.price_cents) === 0;
+  const priceCents = Number(groupClass.price_cents);
+
+  const isFree = priceCents === 0;
 
   const price = new Intl.NumberFormat("en-CA", {
     style: "currency",
     currency: "CAD",
-  }).format(Number(groupClass.price_cents) / 100);
+  }).format(priceCents / 100);
 
   const scheduledDate = new Date(
     groupClass.scheduled_at
@@ -37,7 +38,7 @@ export default function GroupClassCard({ groupClass }) {
           </span>
 
           <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-[#173472]">
-            {isFree ? "Free" : `${price} CAD`}
+            {isFree ? "Free" : `${price} CAD / student`}
           </span>
         </div>
 
@@ -127,7 +128,9 @@ export default function GroupClassCard({ groupClass }) {
             >
               {isFull
                 ? "Class full"
-                : `${remaining} seats left`}
+                : `${remaining} ${
+                    remaining === 1 ? "seat" : "seats"
+                  } left`}
             </span>
           </div>
 
@@ -153,16 +156,26 @@ export default function GroupClassCard({ groupClass }) {
               }}
             />
           </div>
+
+          <p className="text-xs text-[#64748b]">
+            Maximum {capacity} students per class.
+          </p>
         </div>
 
         {/* Pricing and action */}
         <div className="mt-auto border-t border-[#edf0f5] pt-4">
           <p className="mb-1 text-xs text-[#64748b]">
-            Price per student
+            Price per student, per session
           </p>
 
           <p className="text-2xl font-extrabold text-[#173472]">
             {isFree ? "Free" : `${price} CAD`}
+          </p>
+
+          <p className="mt-2 text-xs text-[#64748b]">
+            {isFree
+              ? "No payment required."
+              : "One-time payment for the entire class."}
           </p>
 
           {!isFree && (

@@ -60,31 +60,49 @@ export default function LiveClassroom({
     !isCompleted &&
     !isCancelled;
 
+  // Check whether the participant meets the payment requirements.
+  const paymentEligible =
+    classroom?.paymentEligible === true;
+
+  // Check whether the classroom has an active booking or class.
+  const isActiveClassroom =
+    type === "group"
+      ? ["published", "live"].includes(classroomStatus)
+      : classroomStatus === "accepted";
+
   // Determine whether the tutor can request to start the classroom.
   const canStart =
     isTutor &&
+    paymentEligible &&
     !isLive &&
     !isCompleted &&
     !isCancelled &&
-    (
-      type === "group"
-        ? classroomStatus === "published"
-        : classroomStatus === "accepted"
-    );
+    isActiveClassroom &&
+    classroom?.canStart === true;
 
   // Determine whether the participant can join.
   const canJoin =
     (isTutor || isStudent) &&
+    paymentEligible &&
     isLive &&
+    isActiveClassroom &&
     classroom?.canJoin === true;
 
   // Determine whether the student is waiting for the tutor.
   const isWaitingForTutor =
     isStudent &&
+    paymentEligible &&
     !isLive &&
     !isCompleted &&
     !isCancelled &&
     ["published", "accepted"].includes(classroomStatus);
+
+  // Determine whether payment requirements are preventing access.
+  const paymentBlocked =
+    classroom &&
+    !paymentEligible &&
+    !isCompleted &&
+    !isCancelled;
 
   // Verify the authenticated user and classroom access.
   useEffect(() => {
@@ -100,16 +118,30 @@ export default function LiveClassroom({
           }
         );
 
+        if (controller.signal.aborted) return;
+
         if (userResponse.status === 401) {
           router.replace("/login");
           return;
         }
 
-        const userData = await userResponse.json();
+        const userData = await userResponse
+          .json()
+          .catch(() => null);
 
-        if (!userResponse.ok || !userData.user) {
+        if (controller.signal.aborted) return;
+
+        if (userResponse.ok && !userData?.user) {
+          setUser(null);
+          router.replace("/login");
+          return;
+        }
+
+        if (!userResponse.ok || !userData?.user) {
           throw new Error(
-            "Unable to verify your account."
+            userData?.error ||
+              userData?.message ||
+              "Unable to verify your account."
           );
         }
 
@@ -132,15 +164,24 @@ export default function LiveClassroom({
           }
         );
 
-        const classroomData =
-          await classroomResponse.json();
+        if (controller.signal.aborted) return;
+
+        if (classroomResponse.status === 401) {
+          router.replace("/login");
+          return;
+        }
+
+        const classroomData = await classroomResponse
+          .json()
+          .catch(() => null);
 
         if (
           !classroomResponse.ok ||
-          !classroomData.success
+          !classroomData?.success
         ) {
           throw new Error(
-            classroomData.message ||
+            classroomData?.message ||
+              classroomData?.error ||
               "You cannot access this classroom."
           );
         }
@@ -152,7 +193,13 @@ export default function LiveClassroom({
         }
       } catch (error) {
         if (!controller.signal.aborted) {
-          setAccessError(error.message);
+          setConnection(null);
+          setClassroom(null);
+
+          setAccessError(
+            error.message ||
+              "Unable to verify classroom access."
+          );
         }
       } finally {
         if (!controller.signal.aborted) {
@@ -166,11 +213,10 @@ export default function LiveClassroom({
     return () => controller.abort();
   }, [type, sessionId, router]);
 
-  // Automatically refresh classroom status while waiting.
+  // Automatically refresh classroom status before and during sessions.
   useEffect(() => {
     if (
       !user ||
-      connection ||
       loading ||
       checkingAccess ||
       accessError
@@ -196,21 +242,89 @@ export default function LiveClassroom({
           }
         );
 
-        const data = await response.json();
+        const data = await response
+          .json()
+          .catch(() => null);
 
         if (controller.signal.aborted) return;
 
-        if (response.ok && data.success) {
+        if (response.ok && data?.success) {
           setClassroom(data);
+
+          // Check whether the classroom has ended.
+          const sessionEnded =
+            ["completed", "cancelled"].includes(
+              data.session?.status
+            ) ||
+            ["completed", "cancelled"].includes(
+              data.classroomStatus
+            );
+
+          // Check whether the booking or class remains active.
+          const classroomActive =
+            type === "group"
+              ? ["published", "live"].includes(
+                  data.classroomStatus
+                )
+              : data.classroomStatus === "accepted";
+
+          // Disconnect participants when the classroom ends.
+          if (connection && sessionEnded) {
+            setConnection(null);
+            setError("");
+            return;
+          }
+
+          // Disconnect students when their access is withdrawn.
+          if (
+            connection &&
+            user.role === "student" &&
+            (
+              data.paymentEligible !== true ||
+              data.canJoin !== true ||
+              data.session?.status !== "live" ||
+              !classroomActive
+            )
+          ) {
+            setConnection(null);
+
+            setError(
+              "Your classroom access is no longer available. Please check your booking or enrolment details."
+            );
+
+            return;
+          }
+
+          // Allow tutors to end an existing live classroom
+          // even when payment eligibility changes.
+          if (
+            connection &&
+            user.role === "tutor" &&
+            (
+              data.paymentEligible !== true ||
+              data.canJoin !== true ||
+              !classroomActive
+            )
+          ) {
+            setError(
+              "Classroom access requirements are no longer satisfied. Please end the classroom."
+            );
+          }
+
         } else if (response.status === 401) {
+          setConnection(null);
+          setUser(null);
           router.replace("/login");
+
         } else if (
           [403, 404].includes(response.status)
         ) {
+          setConnection(null);
           setClassroom(null);
 
           setAccessError(
-            data.message ||
+            data?.message ||
+              data?.error ||
               "Classroom access is unavailable."
           );
         }
@@ -264,6 +378,14 @@ export default function LiveClassroom({
       return;
     }
 
+    // Prevent access when payment requirements are not satisfied.
+    if (!paymentEligible) {
+      setError(
+        "Classroom access requires valid pricing and verified payment."
+      );
+      return;
+    }
+
     // Only eligible tutors can start classrooms.
     if (action === "start" && !canStart) {
       return;
@@ -292,11 +414,21 @@ export default function LiveClassroom({
         }
       );
 
-      const data = await response.json();
+      // Redirect users when their authentication expires.
+      if (response.status === 401) {
+        setConnection(null);
+        router.replace("/login");
+        return;
+      }
 
-      if (!response.ok || !data.success) {
+      const data = await response
+        .json()
+        .catch(() => null);
+
+      if (!response.ok || !data?.success) {
         throw new Error(
-          data.message ||
+          data?.message ||
+            data?.error ||
             "Unable to access classroom."
         );
       }
@@ -316,6 +448,7 @@ export default function LiveClassroom({
           type === "group"
             ? "live"
             : previous?.classroomStatus,
+        canStart: false,
         canJoin: true,
       }));
 
@@ -325,7 +458,10 @@ export default function LiveClassroom({
         serverUrl: data.serverUrl,
       });
     } catch (error) {
-      setError(error.message);
+      setError(
+        error.message ||
+          "Unable to connect to the classroom."
+      );
     } finally {
       setLoading(false);
     }
@@ -341,7 +477,7 @@ export default function LiveClassroom({
 
   // Allow only the tutor to end the classroom.
   async function endClassroom() {
-    if (!isTutor || loading || !connection) {
+    if (!isTutor || loading || !isLive) {
       return;
     }
 
@@ -369,11 +505,21 @@ export default function LiveClassroom({
         }
       );
 
-      const data = await response.json();
+      // Redirect users when their authentication expires.
+      if (response.status === 401) {
+        setConnection(null);
+        router.replace("/login");
+        return;
+      }
 
-      if (!response.ok || !data.success) {
+      const data = await response
+        .json()
+        .catch(() => null);
+
+      if (!response.ok || !data?.success) {
         throw new Error(
-          data.message ||
+          data?.message ||
+            data?.error ||
             "Unable to end classroom."
         );
       }
@@ -387,13 +533,17 @@ export default function LiveClassroom({
           status: "completed",
         },
         classroomStatus: "completed",
+        canStart: false,
         canJoin: false,
       }));
 
       setConnection(null);
       router.back();
     } catch (error) {
-      setError(error.message);
+      setError(
+        error.message ||
+          "Unable to end the classroom."
+      );
     } finally {
       setLoading(false);
     }
@@ -495,6 +645,46 @@ export default function LiveClassroom({
             </p>
           )}
 
+          {/* Display verified payment eligibility. */}
+          {paymentEligible &&
+            !isCompleted &&
+            !isCancelled && (
+              <div className="mt-4 rounded-xl bg-green-50 p-4 text-sm text-green-700">
+                <p className="font-bold">
+                  Payment requirements satisfied
+                </p>
+
+                <p className="mt-1 text-xs leading-5">
+                  The payment requirements for this
+                  classroom have been verified.
+                </p>
+              </div>
+            )}
+
+          {/* Display payment restrictions. */}
+          {paymentBlocked && (
+            <div className="mt-4 rounded-xl bg-[#fff8dc] p-4 text-sm text-[#725b00]">
+              <p className="font-bold">
+                Classroom access restricted
+              </p>
+
+              <p className="mt-2 text-xs leading-5">
+                Classroom access requires valid pricing
+                and verified payment where applicable.
+                Please check your{" "}
+                {type === "group"
+                  ? "enrolment"
+                  : "booking"}{" "}
+                details.
+              </p>
+
+              <p className="mt-2 text-xs leading-5">
+                This page updates automatically when
+                your access requirements are satisfied.
+              </p>
+            </div>
+          )}
+
           {/* Display classroom errors. */}
           {error && (
             <p
@@ -506,7 +696,7 @@ export default function LiveClassroom({
           )}
 
           <div className="mt-6 flex flex-col gap-3">
-            {/* Only tutors can start classrooms. */}
+            {/* Only eligible tutors can start classrooms. */}
             {canStart && (
               <>
                 <button
@@ -560,23 +750,85 @@ export default function LiveClassroom({
               </>
             )}
 
-            {/* Display classroom access restrictions. */}
-            {isLive && !canJoin && (
-              <p className="rounded-xl bg-amber-50 p-3 text-center text-sm text-amber-700">
-                Classroom access is currently unavailable.
-                Please check your scheduled session time.
-              </p>
+            {/* Display payment access restrictions. */}
+            {paymentBlocked && (
+              <button
+                type="button"
+                disabled
+                className="cursor-not-allowed rounded-xl bg-gray-100 px-5 py-3 font-bold text-gray-500"
+              >
+                Classroom Access Restricted
+              </button>
             )}
+
+            {/* Display classroom access restrictions. */}
+            {isLive &&
+              paymentEligible &&
+              !canJoin && (
+                <p className="rounded-xl bg-amber-50 p-3 text-center text-sm text-amber-700">
+                  Classroom access is currently unavailable.
+                  Please check your scheduled session time.
+                </p>
+              )}
+
+            {/* Inform tutors when the classroom cannot be started yet. */}
+            {isTutor &&
+              paymentEligible &&
+              isActiveClassroom &&
+              !isLive &&
+              !isCompleted &&
+              !isCancelled &&
+              !canStart && (
+                <p className="rounded-xl bg-amber-50 p-3 text-center text-sm text-amber-700">
+                  You cannot start this classroom yet.
+                  Please check your scheduled session time.
+                  This page updates automatically.
+                </p>
+              )}
 
             {!isLive &&
               !isCompleted &&
               !isCancelled &&
+              !paymentBlocked &&
               !canStart &&
-              !isWaitingForTutor && (
+              !isWaitingForTutor &&
+              !(isTutor && isActiveClassroom) && (
                 <p className="rounded-xl bg-gray-100 p-4 text-center text-sm font-bold">
                   This classroom is not ready for access.
                 </p>
               )}
+
+            {/* Allow tutors to end a live classroom without reconnecting. */}
+            {isTutor && isLive && (
+              <button
+                type="button"
+                disabled={loading}
+                onClick={endClassroom}
+                className="rounded-xl bg-red-600 px-5 py-3 font-bold text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {loading
+                  ? "Ending Classroom..."
+                  : "End Classroom"}
+              </button>
+            )}
+
+            {/* Allow participants to return to their dashboard. */}
+            {paymentBlocked && (
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() =>
+                  router.push(
+                    isTutor
+                      ? "/dashboard/tutor"
+                      : "/dashboard/student"
+                  )
+                }
+                className="rounded-xl border border-[#dce2ec] px-5 py-3 text-sm font-bold text-[#26469b] disabled:opacity-50"
+              >
+                View Dashboard
+              </button>
+            )}
 
             <button
               type="button"

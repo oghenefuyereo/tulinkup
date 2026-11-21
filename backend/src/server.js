@@ -27,6 +27,9 @@ const groupClassRoutes = require("./routes/groupClassRoutes");
 // Import the Live Session routes.
 const liveSessionRoutes = require("./routes/liveSessionRoutes");
 
+// Import the Stripe Connect routes.
+const stripeConnectRoutes = require("./routes/stripeConnectRoutes");
+
 // Create the Express app and set the port it will run on.
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -92,6 +95,9 @@ app.use("/api/group-classes", groupClassRoutes);
 
 // Connect the Live Session API for one-on-one and group classrooms.
 app.use("/api/live-sessions", liveSessionRoutes);
+
+// Connect the Stripe Connect API for managing tutor payment accounts.
+app.use("/api/stripe-connect", stripeConnectRoutes);
 
 // Return a 404 response when someone requests an endpoint that does not exist.
 app.use((req, res) => {
