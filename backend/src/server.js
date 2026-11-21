@@ -3,6 +3,7 @@ require("dotenv").config();
 
 // Import the packages needed to run the backend.
 const express = require("express");
+const { handleStripeWebhook } = require("./controllers/stripeWebhookController");
 const cors = require("cors");
 
 // Import the database connection.
@@ -29,6 +30,7 @@ const liveSessionRoutes = require("./routes/liveSessionRoutes");
 
 // Import the Stripe Connect routes.
 const stripeConnectRoutes = require("./routes/stripeConnectRoutes");
+const paymentRoutes = require("./routes/paymentRoutes");
 
 // Create the Express app and set the port it will run on.
 const app = express();
@@ -43,6 +45,9 @@ app.use(
 );
 
 // Allow the server to read JSON data sent in requests.
+// Stripe requires the original raw request body.
+app.post("/api/payments/webhook", express.raw({ type: "application/json", limit: "256kb" }), handleStripeWebhook);
+
 app.use(express.json());
 
 // A simple endpoint to check if the backend is running.
@@ -98,6 +103,7 @@ app.use("/api/live-sessions", liveSessionRoutes);
 
 // Connect the Stripe Connect API for managing tutor payment accounts.
 app.use("/api/stripe-connect", stripeConnectRoutes);
+app.use("/api/payments", paymentRoutes);
 
 // Return a 404 response when someone requests an endpoint that does not exist.
 app.use((req, res) => {
