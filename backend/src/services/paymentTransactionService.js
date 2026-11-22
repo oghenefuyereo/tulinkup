@@ -1,4 +1,6 @@
 
+"use strict";
+
 const pool = require("../config/db");
 const { randomUUID } = require("node:crypto");
 
@@ -147,7 +149,11 @@ async function withPaymentTransaction(
     const commitResult = await client.query("COMMIT");
 
     // Make sure PostgreSQL actually committed the transaction.
-    if (commitResult.command !== "COMMIT") {
+    // Missing or invalid responses require reconciliation.
+    if (
+      !commitResult ||
+      commitResult.command !== "COMMIT"
+    ) {
       throw paymentError(
         "Payment transaction was not committed.",
         500
@@ -670,21 +676,6 @@ async function inspectPaymentHistory(
     ) {
       throw paymentError(
         "Invalid payment history reference.",
-        500
-      );
-    }
-
-    // Reject unknown or unsupported payment statuses.
-    if (
-      !ACTIVE_PAYMENT_STATUSES.includes(
-        payment.payment_status
-      ) &&
-      !historicalStatuses.includes(
-        payment.payment_status
-      )
-    ) {
-      throw paymentError(
-        "Unknown payment history status.",
         500
       );
     }
