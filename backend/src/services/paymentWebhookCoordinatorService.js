@@ -43,6 +43,19 @@ const {
   verifyWebhookFinancialSnapshot,
 } = require("./paymentWebhookFinancialService");
 
+
+const {
+  decideWebhookConfirmation,
+} = require("./paymentWebhookConfirmationDecisionService");
+
+const {
+  checkWebhookGroupCapacity,
+} = require("./paymentWebhookCapacityService");
+
+const {
+  applyWebhookAtomicUpdate,
+} = require("./paymentWebhookAtomicUpdateService");
+
 function sourceIdForPayment(payment) {
   if (payment.payment_type === "one_on_one") {
     return payment.booking_id;
@@ -199,6 +212,201 @@ async function prepareWebhookReconciliation(
   }, database);
 }
 
+async function reconcileWebhookPayment(
+  event,
+  database
+) {
+  const validated = validateWebhookCheckoutEvent(event);
+
+  if (!database || typeof database.connect !== "function") {
+    throw new Error(
+      "An explicitly supplied test database is required."
+    );
+  }
+
+  return withPaymentTransaction(async (client) => {
+    const lookup = buildWebhookPaymentLookup(
+      validated.paymentId
+    );
+
+    const initial = await client.query(
+      lookup.text,
+      lookup.values
+    );
+
+    if (!initial.rows || initial.rows.length !== 1) {
+      throw new Error("Webhook payment not found.");
+    }
+
+    const candidate = initial.rows[0];
+    const sourceId = sourceIdForPayment(candidate);
+
+    let source;
+
+    if (candidate.payment_type === "one_on_one") {
+      source = await lockBooking(
+        sourceId,
+        candidate.student_id,
+        client
+      );
+    } else {
+      const locked = await lockGroupEnrollment(
+        sourceId,
+        candidate.student_id,
+        client
+      );
+
+      source = {
+        ...locked.enrollment,
+        groupClass: locked.groupClass,
+      };
+    }
+
+    const historyLookup =
+      buildWebhookPaymentHistoryLookup(
+        candidate.payment_type,
+        sourceId,
+        candidate.student_id
+      );
+
+    const historyResult = await client.query(
+      historyLookup.text,
+      historyLookup.values
+    );
+
+    if (!Array.isArray(historyResult.rows)) {
+      throw new Error("Invalid webhook payment history.");
+    }
+
+    // Verify ownership and source references for every
+    // historical payment before making a history decision.
+    for (const historicalPayment of historyResult.rows) {
+      if (
+        !historicalPayment ||
+        typeof historicalPayment !== "object" ||
+        String(historicalPayment.student_id ?? "") !==
+          String(source.student_id) ||
+        String(historicalPayment.tutor_id ?? "") !==
+          String(
+            candidate.payment_type === "one_on_one"
+              ? source.tutor_id
+              : source.groupClass?.tutor_id
+          ) ||
+        historicalPayment.payment_type !==
+          candidate.payment_type ||
+        String(sourceIdForPayment(historicalPayment)) !==
+          String(sourceId)
+      ) {
+        throw new Error(
+          "Webhook payment history ownership or reference mismatch."
+        );
+      }
+    }
+
+    const historyDecision =
+      decideWebhookPaymentHistory(
+        validated.paymentId,
+        historyResult.rows
+      );
+
+    if (historyDecision.action !== "continue") {
+      return {
+        action: "manual_review",
+        reason: historyDecision.reason,
+      };
+    }
+
+    const payment = await lockWebhookPayment(
+      validated.paymentId,
+      client
+    );
+
+    if (
+      String(payment.id) !== String(candidate.id) ||
+      payment.payment_type !== candidate.payment_type ||
+      String(payment.student_id) !==
+        String(candidate.student_id) ||
+      String(sourceIdForPayment(payment)) !==
+        String(sourceId)
+    ) {
+      throw new Error(
+        "Webhook payment references changed during locking."
+      );
+    }
+
+    verifyWebhookPaymentReferences(payment, source);
+
+    verifyPersistedCheckoutSession(
+      payment,
+      validated.session
+    );
+
+    verifyWebhookFinancialSnapshot(
+      payment,
+      validated.session,
+      source
+    );
+
+    
+    const decision = decideWebhookConfirmation({
+      payment,
+      eventType: validated.eventType,
+      session: validated.session,
+      source,
+      groupClass: source.groupClass,
+    });
+
+    if (decision.action !== "apply") {
+      return {
+        action: decision.action,
+        reason: decision.reason || null,
+        paymentId: String(payment.id),
+      };
+    }
+
+    if (
+      decision.updatePayment !== true ||
+      decision.updateSource !== true ||
+      !["processing", "paid", "failed", "expired"].includes(
+        decision.targetStatus
+      )
+    ) {
+      throw new Error("Unsafe webhook update decision.");
+    }
+
+    if (
+      payment.payment_type === "group" &&
+      decision.targetStatus === "paid"
+    ) {
+      if (decision.requiresCapacityCheck !== true) {
+        throw new Error("Group capacity check is required.");
+      }
+
+      const capacity = await checkWebhookGroupCapacity({
+        client,
+        groupClass: source.groupClass,
+        enrollment: source,
+      });
+
+      if (!capacity.eligible) {
+        return {
+          action: "manual_review",
+          reason: capacity.reason || "class_over_capacity",
+          paymentId: String(payment.id),
+        };
+      }
+    }
+
+    return applyWebhookAtomicUpdate({
+      client,
+      payment,
+      sourceId,
+      targetStatus: decision.targetStatus,
+    });
+  }, database);
+}
+
 module.exports = {
   prepareWebhookReconciliation,
+  reconcileWebhookPayment,
 };
