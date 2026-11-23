@@ -124,7 +124,7 @@ const classSelect = `
       FROM public.group_class_enrollments e
       WHERE e.class_id = gc.id
       AND e.enrollment_status IN (
-        'confirmed', 'attended', 'absent'
+        'pending', 'confirmed', 'attended', 'absent'
       )
     ) AS enrolled_students
   FROM public.group_classes gc
@@ -701,7 +701,7 @@ async function enrollInGroupClass(req, res) {
         FROM public.group_class_enrollments
         WHERE class_id = $1
         AND enrollment_status IN (
-          'confirmed', 'attended', 'absent'
+          'pending', 'confirmed', 'attended', 'absent'
         )
       `,
       [id]
