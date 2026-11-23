@@ -679,6 +679,21 @@ async function inspectPaymentHistory(
         500
       );
     }
+
+    // Reject unknown payment statuses before classifying history.
+    if (
+      !ACTIVE_PAYMENT_STATUSES.includes(
+        payment.payment_status
+      ) &&
+      !historicalStatuses.includes(
+        payment.payment_status
+      )
+    ) {
+      throw paymentError(
+        "Unknown payment history status.",
+        500
+      );
+    }
   }
 
   // Identify payments that are still active.

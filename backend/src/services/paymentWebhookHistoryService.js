@@ -1,7 +1,10 @@
+
 "use strict";
 
 // Pure SQL builder for webhook payment history inspection.
 // The caller must lock the payment source first.
+// Includes all sandbox payment attempts for the source,
+// regardless of student ownership, to detect conflicts.
 // No database connections or Stripe API requests.
 
 const MAX_ID = 9223372036854775807n;
@@ -36,7 +39,11 @@ function buildWebhookPaymentHistoryLookup(
   }
 
   const id = normalizeId(sourceId, "source ID");
-  const ownerId = normalizeId(studentId, "student ID");
+
+  // Validate the student ID, but do not use it to
+  // filter payment history. All payment attempts
+  // for this source must remain visible.
+  normalizeId(studentId, "student ID");
 
   const sourceColumn =
     paymentType === "one_on_one"
@@ -49,11 +56,10 @@ function buildWebhookPaymentHistoryLookup(
       FROM public.payments p
       WHERE p.${sourceColumn} = $1
         AND p.payment_type = $2
-        AND p.student_id = $3
         AND p.livemode = false
       ORDER BY p.created_at DESC, p.id DESC
     `,
-    values: [id, paymentType, ownerId],
+    values: [id, paymentType],
   };
 }
 

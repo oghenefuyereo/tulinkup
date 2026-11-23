@@ -1,3 +1,4 @@
+
 "use strict";
 
 // TuLinkUp webhook reconciliation coordinator.
@@ -116,6 +117,35 @@ async function prepareWebhookReconciliation(
       historyLookup.values
     );
 
+    if (!Array.isArray(historyResult.rows)) {
+      throw new Error("Invalid webhook payment history.");
+    }
+
+    // Verify ownership and source references for every
+    // historical payment before making a history decision.
+    for (const historicalPayment of historyResult.rows) {
+      if (
+        !historicalPayment ||
+        typeof historicalPayment !== "object" ||
+        String(historicalPayment.student_id ?? "") !==
+          String(source.student_id) ||
+        String(historicalPayment.tutor_id ?? "") !==
+          String(
+            candidate.payment_type === "one_on_one"
+              ? source.tutor_id
+              : source.groupClass?.tutor_id
+          ) ||
+        historicalPayment.payment_type !==
+          candidate.payment_type ||
+        String(sourceIdForPayment(historicalPayment)) !==
+          String(sourceId)
+      ) {
+        throw new Error(
+          "Webhook payment history ownership or reference mismatch."
+        );
+      }
+    }
+
     const historyDecision =
       decideWebhookPaymentHistory(
         validated.paymentId,
@@ -148,6 +178,7 @@ async function prepareWebhookReconciliation(
     }
 
     verifyWebhookPaymentReferences(payment, source);
+
     verifyPersistedCheckoutSession(
       payment,
       validated.session
