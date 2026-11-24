@@ -219,12 +219,59 @@ export function AuthForm({
         return;
       }
 
-      // Choose the correct dashboard based on the user's role.
-      const destination =
-        next ||
-        (data.user.role === "tutor"
-          ? "/dashboard/tutor"
-          : "/dashboard/student");
+      // Select the dashboard using the verified account role.
+      const role = data.user?.role;
+
+      const dashboards = {
+        student: "/dashboard/student",
+        tutor: "/dashboard/tutor",
+        admin: "/dashboard/admin"
+      };
+
+      // Reject unsupported account roles.
+      if (!Object.hasOwn(dashboards, role)) {
+        setError("Invalid account role.");
+        return;
+      }
+
+      let destination = dashboards[role];
+
+      // Allow safe internal redirects for students and tutors.
+      // Administrators always enter their dedicated dashboard.
+      if (
+        role !== "admin" &&
+        typeof next === "string" &&
+        next.startsWith("/") &&
+        !next.startsWith("//") &&
+        !next.includes("\\") &&
+        !/%(?:2f|5c|25)/i.test(next) &&
+        !/[\u0000-\u0020\u007f]/.test(next)
+      ) {
+        const target = new URL(
+          next,
+          window.location.origin
+        );
+
+        const pathname = target.pathname;
+
+        const isDashboard =
+          pathname === "/dashboard" ||
+          pathname.startsWith("/dashboard/");
+
+        const ownDashboard =
+          pathname === dashboards[role] ||
+          pathname.startsWith(dashboards[role] + "/");
+
+        if (
+          target.origin === window.location.origin &&
+          (!isDashboard || ownDashboard)
+        ) {
+          destination =
+            target.pathname +
+            target.search +
+            target.hash;
+        }
+      }
 
       // Redirect the user after successful authentication.
       window.location.assign(destination);

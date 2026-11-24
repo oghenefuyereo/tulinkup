@@ -4,15 +4,19 @@ const express = require("express");
 
 // Import the middleware that checks for administrator access.
 const { requireAdmin } = require("../middleware/adminMiddleware");
+const { protect } = require("../middleware/authMiddleware");
 
 // Create a router to handle administrator requests.
 const router = express.Router();
+
+// Every administrator endpoint requires an active admin account.
+router.use(protect, requireAdmin);
 
 // This route must be mounted behind a middleware
 // that verifies an admin JWT and sets req.user.
 
 // Allow only administrators to access the dashboard route.
-router.get("/dashboard", requireAdmin, (req, res) => {
+router.get("/dashboard", (req, res) => {
   // Send a welcome message when an administrator accesses the dashboard.
   res.json({
     success: true,

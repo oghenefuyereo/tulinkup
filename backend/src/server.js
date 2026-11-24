@@ -104,6 +104,9 @@ app.get("/api/db-test", async (req, res) => {
 
 // Connect the routes to their API paths.
 app.use("/api/auth", authRoutes);
+
+// Register protected administrator endpoints.
+app.use("/api/admin", require("./routes/adminRoutes"));
 app.use("/api/tutors", tutorRoutes);
 app.use("/api/profile", profileRoutes);
 app.use("/api/bookings", bookingRoutes);
