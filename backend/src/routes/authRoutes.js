@@ -27,4 +27,25 @@ router.post("/login", login);
 router.get("/me", protect, getMe);
 
 // Export the router so it can be used in the main server.
+
+const {
+  startGoogleAuth,
+  completeGoogleAuth
+} = require("../controllers/googleAuthController");
+
+const { requireOAuthInternal } =
+  require("../middleware/oauthInternalMiddleware");
+
+router.post(
+  "/google/start",
+  requireOAuthInternal,
+  startGoogleAuth
+);
+router.post(
+  "/google/complete",
+  requireOAuthInternal,
+  completeGoogleAuth
+);
+
 module.exports = router;
+
