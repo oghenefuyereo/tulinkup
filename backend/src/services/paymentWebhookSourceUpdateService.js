@@ -48,6 +48,13 @@ function buildWebhookSourceUpdate(
         WHERE id = $2
           AND status = 'pending'
           AND payment_status = 'pending'
+          AND (
+            $1 <> 'paid'
+            OR (
+              (booking_date + booking_time)
+              AT TIME ZONE 'America/Toronto'
+            ) > clock_timestamp()
+          )
         RETURNING id, payment_status, status
       `,
       values: [
@@ -71,6 +78,16 @@ function buildWebhookSourceUpdate(
         WHERE id = $3
           AND enrollment_status = 'pending'
           AND payment_status = 'pending'
+          AND (
+            $1 <> 'paid'
+            OR EXISTS (
+              SELECT 1
+              FROM public.group_classes c
+              WHERE c.id = group_class_enrollments.class_id
+                AND c.status = 'published'
+                AND c.scheduled_at > clock_timestamp()
+            )
+          )
         RETURNING id, payment_status, enrollment_status
       `,
       values: [

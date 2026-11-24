@@ -22,9 +22,21 @@ function validateWebhookConfirmationEligibility({
   }
 
   if (paymentType === "one_on_one") {
-    return source.status === "pending"
-      ? { eligible: true, reason: null }
-      : { eligible: false, reason: "booking_not_pending" };
+    if (source.status !== "pending") {
+      return {
+        eligible: false,
+        reason: "booking_not_pending"
+      };
+    }
+
+    if (source.is_future !== true) {
+      return {
+        eligible: false,
+        reason: "booking_not_future"
+      };
+    }
+
+    return { eligible: true, reason: null };
   }
 
   if (paymentType === "group") {

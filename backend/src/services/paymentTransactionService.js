@@ -261,7 +261,11 @@ async function lockBooking(
 
   // Lock only the booking belonging to this student.
   const result = await client.query(
-    `SELECT b.*
+    `SELECT b.*,
+       (
+         (b.booking_date + b.booking_time)
+         AT TIME ZONE 'America/Toronto'
+       ) > clock_timestamp() AS is_future
      FROM public.bookings b
      WHERE b.id = $1
        AND b.student_id = $2
