@@ -1,63 +1,111 @@
+"use strict";
 
-// Import the JWT library to verify user authentication tokens.
 const jwt = require("jsonwebtoken");
+const pool = require("../config/db");
 
-// Protect routes by checking whether the user has a valid login token.
-const protect = (req, res, next) => {
-  // Get the authentication information from the request headers.
+// Authenticate users and verify their current database permissions.
+async function protect(req, res, next) {
+  res.set("Cache-Control", "no-store");
+
   const authorization = req.headers.authorization;
 
-  // Make sure the request includes a Bearer token.
-  if (!authorization?.startsWith("Bearer ")) {
+  if (
+    typeof authorization !== "string" ||
+    !authorization.startsWith("Bearer ")
+  ) {
     return res.status(401).json({
       success: false,
-      message: "Authentication required",
+      message: "Authentication required."
     });
   }
 
-  // Extract the token by removing "Bearer " from the header.
   const token = authorization.slice(7);
 
-  // Check that the token and JWT secret are available.
   if (!token || !process.env.JWT_SECRET) {
     return res.status(401).json({
       success: false,
-      message: "Invalid authentication",
+      message: "Invalid authentication."
     });
   }
 
+  let decoded;
+
   try {
-    // Verify the token using the secret key and expected algorithm.
-    const decoded = jwt.verify(
+    decoded = jwt.verify(
       token,
       process.env.JWT_SECRET,
       { algorithms: ["HS256"] }
     );
 
-    // Make sure the verified token contains a user ID.
-    if (!decoded.userId) {
+    if (
+      !decoded ||
+      typeof decoded !== "object" ||
+      !["string", "number"].includes(typeof decoded.userId) ||
+      !/^[1-9][0-9]{0,18}$/.test(String(decoded.userId)) ||
+      BigInt(decoded.userId) > 9223372036854775807n ||
+      (
+        typeof decoded.userId === "number" &&
+        !Number.isSafeInteger(decoded.userId)
+      ) ||
+      !["student", "tutor", "admin"].includes(decoded.role)
+    ) {
+      throw new Error("Invalid token identity.");
+    }
+  } catch {
+    return res.status(401).json({
+      success: false,
+      message: "Invalid or expired token."
+    });
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT id, role, account_status
+       FROM public.users
+       WHERE id = $1`,
+      [String(decoded.userId)]
+    );
+
+    const user = result.rows[0];
+
+    if (!user) {
       return res.status(401).json({
         success: false,
-        message: "Invalid token",
+        message: "Account not found."
       });
     }
 
-    // Save the user's ID and role so other routes can access them.
-    req.user = {
-      userId: decoded.userId,
-      role: decoded.role,
-    };
+    if (user.account_status !== "active") {
+      return res.status(403).json({
+        success: false,
+        message: "This account is not active."
+      });
+    }
 
-    // Allow the request to continue after successful authentication.
-    next();
+    if (
+      !["student", "tutor", "admin"].includes(user.role) ||
+      decoded.role !== user.role
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: "Account permissions changed. Please sign in again."
+      });
+    }
+
+    req.user = {
+      userId: user.id,
+      role: user.role
+    };
   } catch {
-    // Reject the request if the token is invalid or has expired.
-    return res.status(401).json({
+    console.error("Authentication database verification failed.");
+
+    return res.status(503).json({
       success: false,
-      message: "Invalid or expired token",
+      message: "Authentication temporarily unavailable."
     });
   }
-};
 
-// Export the middleware so it can protect routes that require login.
+  return next();
+}
+
 module.exports = { protect };

@@ -119,7 +119,7 @@ const login = async (req, res) => {
 
     // Search for the account using the submitted email.
     const result = await pool.query(
-      `SELECT id, full_name, email, password_hash, role
+      `SELECT id, full_name, email, password_hash, role, account_status
        FROM public.users
        WHERE email = $1`,
       [normalizedEmail]
@@ -150,6 +150,21 @@ const login = async (req, res) => {
       });
     }
 
+    // Only active accounts can authenticate.
+    if (user.account_status !== "active") {
+      return res.status(403).json({
+        success: false,
+        message: "This account is not active."
+      });
+    }
+
+    if (!["student", "tutor", "admin"].includes(user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: "Invalid account role."
+      });
+    }
+
     // Make sure the secret key needed to sign tokens is configured.
     if (!process.env.JWT_SECRET) {
       throw new Error("JWT_SECRET is not configured");
@@ -162,7 +177,7 @@ const login = async (req, res) => {
         role: user.role
       },
       process.env.JWT_SECRET,
-      { expiresIn: "1h" }
+      { algorithm: "HS256", expiresIn: "1h" }
     );
 
     // Send the token and user information after a successful login.

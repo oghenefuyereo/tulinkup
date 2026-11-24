@@ -35,6 +35,7 @@ export function AuthForm({
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [githubLoading, setGithubLoading] = useState(false);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -43,17 +44,17 @@ export function AuthForm({
     if (!reason) return;
 
     const messages = {
-      expired: "Your Google session expired. Please try again.",
-      invalid_state: "Google authentication expired or was invalid.",
-      cancelled: "Google authentication was cancelled.",
+      expired: "Your authentication session expired. Please try again.",
+      invalid_state: "Your authentication session expired or was invalid.",
+      cancelled: "Social authentication was cancelled.",
       account_inactive: "Your account is not active.",
-      account_not_found: "Please create an account with Google first.",
+      account_not_found: "Please register using your chosen sign-in method first.",
       account_exists: "An account already exists. Use your original sign-in method.",
-      authentication_failed: "Google authentication failed. Please try again."
+      authentication_failed: "Social authentication failed. Please try again."
     };
 
     setError(
-      messages[reason] || "Google authentication failed."
+      messages[reason] || "Social authentication failed."
     );
 
     params.delete("oauth_error");
@@ -70,7 +71,7 @@ export function AuthForm({
   }, []);
 
   async function startGoogle() {
-    if (loading || googleLoading) return;
+    if (loading || googleLoading || githubLoading) return;
 
     setError("");
 
@@ -116,6 +117,56 @@ export function AuthForm({
     }
   }
 
+  async function startGitHub() {
+    if (loading || googleLoading || githubLoading) return;
+
+    setError("");
+
+    if (register && !form.terms) {
+      setError("Accept the terms to create your account.");
+      return;
+    }
+
+    setGithubLoading(true);
+
+    try {
+      const response = await fetch("/api/auth/github/start", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          mode,
+          role: form.role,
+          termsAccepted: form.terms
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.authorizationUrl) {
+        throw new Error(
+          data.message || "Unable to start GitHub authentication."
+        );
+      }
+
+      const destination = new URL(data.authorizationUrl);
+
+      if (
+        destination.origin !== "https://github.com" ||
+        destination.pathname !== "/login/oauth/authorize"
+      ) {
+        throw new Error("Invalid GitHub authorization destination.");
+      }
+
+      window.location.assign(destination.toString());
+
+    } catch (error) {
+      setError(error.message || "GitHub authentication failed.");
+      setGithubLoading(false);
+    }
+  }
+
   // Update a specific field whenever the user enters information.
   const set = (key, value) => {
     setForm((current) => ({
@@ -129,7 +180,7 @@ export function AuthForm({
     // Prevent the browser from refreshing the page.
     event.preventDefault();
 
-    if (loading || googleLoading) return;
+    if (loading || googleLoading || githubLoading) return;
 
     // Clear any previous error messages.
     setError("");
@@ -376,7 +427,7 @@ export function AuthForm({
             {/* Submit the form and show progress while processing. */}
             <button
               type="submit"
-              disabled={loading || googleLoading}
+              disabled={loading || googleLoading || githubLoading}
               className="btn-primary w-full py-4 disabled:opacity-60"
             >
               {loading
@@ -398,7 +449,7 @@ export function AuthForm({
           <button
             type="button"
             onClick={startGoogle}
-            disabled={loading || googleLoading}
+            disabled={loading || googleLoading || githubLoading}
             className="flex w-full items-center justify-center gap-3 rounded-xl border border-[#dce2ec] bg-white px-4 py-3.5 text-sm font-semibold text-[#26354f] transition hover:bg-gray-50 disabled:opacity-60"
           >
             <svg
@@ -416,6 +467,27 @@ export function AuthForm({
             {googleLoading
               ? "Connecting to Google..."
               : "Continue with Google"}
+          </button>
+
+          <button
+            type="button"
+            onClick={startGitHub}
+            disabled={loading || googleLoading || githubLoading}
+            className="mt-3 flex w-full items-center justify-center gap-3 rounded-xl border border-[#dce2ec] bg-white px-4 py-3.5 text-sm font-semibold text-[#26354f] transition hover:bg-gray-50 disabled:opacity-60"
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58v-2.23c-3.34.73-4.04-1.42-4.04-1.42-.55-1.39-1.33-1.76-1.33-1.76-1.09-.74.08-.73.08-.73 1.2.08 1.84 1.23 1.84 1.23 1.07 1.83 2.81 1.3 3.49.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.23-3.22-.12-.3-.53-1.52.12-3.17 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.65.24 2.87.12 3.17.76.84 1.23 1.91 1.23 3.22 0 4.61-2.81 5.63-5.49 5.93.43.37.81 1.1.81 2.22v3.29c0 .32.22.69.82.58C20.56 21.8 24 17.3 24 12 24 5.37 18.63 0 12 0z"/>
+            </svg>
+
+            {githubLoading
+              ? "Connecting to GitHub..."
+              : "Continue with GitHub"}
           </button>
 
           {/* Allow users to switch between login and registration. */}

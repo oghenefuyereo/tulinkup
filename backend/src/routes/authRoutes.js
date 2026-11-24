@@ -47,5 +47,24 @@ router.post(
   completeGoogleAuth
 );
 
+
+const {
+  startGitHubAuth,
+  completeGitHubAuth
+} = require("../controllers/githubAuthController");
+
+router.post(
+  "/github/start",
+  requireOAuthInternal,
+  startGitHubAuth
+);
+
+router.post(
+  "/github/complete",
+  requireOAuthInternal,
+  completeGitHubAuth
+);
+
 module.exports = router;
+
 
