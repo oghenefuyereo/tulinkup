@@ -239,6 +239,11 @@ export default async function AdminDashboard() {
       description: "Monitor classes, capacity and enrollments.",
       href: "/dashboard/admin/group-classes",
     },
+    {
+      title: "Message reports",
+      description: "Review reported messages and manage moderation decisions.",
+      href: "/dashboard/admin/message-reports",
+    },
   ];
 
   const numberFormat = new Intl.NumberFormat("en-CA");

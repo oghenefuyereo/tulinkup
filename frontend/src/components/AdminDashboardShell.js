@@ -103,6 +103,19 @@ export function AdminDashboardShell({ name, children, activePage = "overview" })
               </Link>
 
               <Link
+                href="/dashboard/admin/message-reports"
+                aria-current={
+                  activePage === "message-reports" ? "page" : undefined
+                }
+                className={
+                  "block rounded-xl px-4 py-3 font-bold text-white " +
+                  (activePage === "message-reports" ? "bg-[#26469b]" : "")
+                }
+              >
+                Message reports
+              </Link>
+
+              <Link
                 href="/dashboard/admin/audit-logs"
                 aria-current={
                   activePage === "audit-logs" ? "page" : undefined

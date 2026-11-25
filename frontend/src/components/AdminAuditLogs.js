@@ -119,6 +119,29 @@ function FilterField({
 
 // Show only fields that changed during an administrative action.
 function AuditChanges({ record }) {
+  // Confidential report access is audited without changing status.
+  if (record.action === "MESSAGE_REPORT_VIEWED") {
+    return (
+      <div className="min-w-56 space-y-2">
+        <p className="text-xs font-bold text-slate-600">
+          Confidential report viewed
+        </p>
+
+        <p className="text-sm font-semibold text-[#173472]">
+          Status: {formatValue("status", record.newValues.status)}
+        </p>
+
+        <p className="text-xs text-slate-500">
+          Status unchanged
+        </p>
+
+        <p className="text-xs text-slate-500">
+          Confidential access recorded.
+        </p>
+      </div>
+    );
+  }
+
   const changedFields = Object.keys(record.previousValues)
     .filter(key =>
       record.previousValues[key] !== record.newValues[key]
