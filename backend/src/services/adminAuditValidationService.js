@@ -12,6 +12,10 @@ const ACTION_TARGETS = Object.freeze({
   PLATFORM_SETTINGS_UPDATED: "platform_settings",
   BOOKING_CANCELLED_BY_ADMIN: "booking",
   GROUP_CLASS_CANCELLED_BY_ADMIN: "group_class",
+  MESSAGE_REPORT_VIEWED: "message_report",
+  MESSAGE_REPORT_REVIEW_STARTED: "message_report",
+  MESSAGE_REPORT_RESOLVED: "message_report",
+  MESSAGE_REPORT_DISMISSED: "message_report",
 });
 
 const APPROVAL_STATUSES = Object.freeze([
@@ -251,6 +255,17 @@ function getSnapshotValidators(targetType) {
           validateEnum(value, GROUP_CLASS_STATUSES),
       };
 
+    case "message_report":
+      return {
+        status: value =>
+          validateEnum(value, [
+            "pending",
+            "reviewing",
+            "resolved",
+            "dismissed",
+          ]),
+      };
+
     case "platform_settings":
       return SETTINGS_VALIDATORS;
 
@@ -294,6 +309,22 @@ function validateChanges(action, previousValues, newValues) {
     throw validationError("Audit snapshot fields must match.");
   }
 
+  // Viewing confidential content is an access event,
+  // not a report status mutation.
+  if (action === "MESSAGE_REPORT_VIEWED") {
+    if (
+      previousKeys.length !== 1 ||
+      previousKeys[0] !== "status" ||
+      previousValues.status !== newValues.status
+    ) {
+      throw validationError(
+        "Invalid message report access audit."
+      );
+    }
+
+    return;
+  }
+
   const changed = previousKeys.some(
     key => previousValues[key] !== newValues[key]
   );
@@ -303,6 +334,23 @@ function validateChanges(action, previousValues, newValues) {
   }
 
   const transitions = {
+    MESSAGE_REPORT_REVIEW_STARTED: [
+      "status",
+      ["pending"],
+      "reviewing",
+    ],
+
+    MESSAGE_REPORT_RESOLVED: [
+      "status",
+      ["reviewing"],
+      "resolved",
+    ],
+
+    MESSAGE_REPORT_DISMISSED: [
+      "status",
+      ["reviewing"],
+      "dismissed",
+    ],
     TUTOR_APPROVED: [
       "approval_status",
       ["pending", "rejected"],

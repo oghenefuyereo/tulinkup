@@ -2,6 +2,8 @@
 require("dotenv").config();
 
 const express = require("express");
+const http = require("node:http");
+const { initializeSocketServer } = require("./realtime/socketServer");
 const cors = require("cors");
 const pool = require("./config/db");
 
@@ -25,6 +27,8 @@ const groupClassRoutes = require("./routes/groupClassRoutes");
 const liveSessionRoutes = require("./routes/liveSessionRoutes");
 const stripeConnectRoutes = require("./routes/stripeConnectRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
+const messagingRoutes = require("./routes/messagingRoutes");
+const realtimeRoutes = require("./routes/realtimeRoutes");
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -125,6 +129,8 @@ app.use("/api/live-sessions", liveSessionRoutes);
 // Stripe Connect and payment routes.
 app.use("/api/stripe-connect", stripeConnectRoutes);
 app.use("/api/payments", paymentRoutes);
+app.use("/api/messages", messagingRoutes);
+app.use("/api/realtime", realtimeRoutes);
 
 // Return a 404 response if the requested route does not exist.
 app.use((req, res) => {
@@ -183,7 +189,13 @@ app.use((error, req, res, next) => {
 });
 
 // Start the TuLinkUp backend.
-const server = app.listen(PORT, () => {
+const server = http.createServer(app);
+
+// Attach real-time messaging to the existing HTTP server.
+initializeSocketServer(server, FRONTEND_URL);
+
+// Start the shared HTTP and Socket.IO server.
+server.listen(PORT, () => {
   console.log(`TuLinkUp API listening on port ${PORT}`);
   console.log(`Frontend: ${FRONTEND_URL}`);
 });

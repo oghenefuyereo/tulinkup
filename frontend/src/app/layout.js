@@ -2,6 +2,8 @@
 // Import the main website header.
 import { Header } from "@/components/Header";
 import { AuthProvider } from "@/context/AuthContext";
+import { RealtimeProvider } from "@/context/RealtimeContext";
+import { UnreadMessagesProvider } from "@/context/UnreadMessagesContext";
 
 // Import the global styles used throughout TuLinkUp.
 import "./globals.css";
@@ -87,13 +89,17 @@ export default function RootLayout({ children }) {
 
         {/* Share authenticated account information across all pages. */}
         <AuthProvider>
-          {/* Display the main navigation header on every page. */}
-          <Header />
+          <RealtimeProvider>
+            <UnreadMessagesProvider>
+              {/* Display the main navigation header on every page. */}
+              <Header />
 
-          {/* Display the content of the current page. */}
-          <div id="main-content" tabIndex={-1}>
-            {children}
-          </div>
+              {/* Display the content of the current page. */}
+              <div id="main-content" tabIndex={-1}>
+                {children}
+              </div>
+            </UnreadMessagesProvider>
+          </RealtimeProvider>
         </AuthProvider>
       </body>
     </html>

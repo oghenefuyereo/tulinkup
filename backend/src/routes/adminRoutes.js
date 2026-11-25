@@ -75,4 +75,34 @@ const {
 // Allow administrators to review the current platform configuration.
 router.get("/settings", getAdminPlatformSettings);
 
+
+// Administrator message reporting and moderation.
+const {
+  getAdminMessageReportStatistics,
+  getAdminMessageReports,
+  getAdminMessageReportById,
+  changeAdminMessageReportStatus,
+} = require("../controllers/adminMessageReportController");
+
+// Register the static statistics route before the ID route.
+router.get(
+  "/message-reports/statistics",
+  getAdminMessageReportStatistics
+);
+
+router.get(
+  "/message-reports",
+  getAdminMessageReports
+);
+
+router.get(
+  "/message-reports/:id",
+  getAdminMessageReportById
+);
+
+router.patch(
+  "/message-reports/:id/status",
+  changeAdminMessageReportStatus
+);
+
 module.exports = router;

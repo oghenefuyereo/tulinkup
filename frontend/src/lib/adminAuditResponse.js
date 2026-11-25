@@ -10,6 +10,10 @@ export const AUDIT_ACTIONS = Object.freeze({
   PLATFORM_SETTINGS_UPDATED: "platform_settings",
   BOOKING_CANCELLED_BY_ADMIN: "booking",
   GROUP_CLASS_CANCELLED_BY_ADMIN: "group_class",
+  MESSAGE_REPORT_VIEWED: "message_report",
+  MESSAGE_REPORT_REVIEW_STARTED: "message_report",
+  MESSAGE_REPORT_RESOLVED: "message_report",
+  MESSAGE_REPORT_DISMISSED: "message_report",
 });
 
 export const AUDIT_TARGETS = Object.freeze([
@@ -32,6 +36,21 @@ const reasons = [
 ];
 
 const transitions = {
+  MESSAGE_REPORT_REVIEW_STARTED: [
+    "status",
+    ["pending"],
+    "reviewing",
+  ],
+  MESSAGE_REPORT_RESOLVED: [
+    "status",
+    ["reviewing"],
+    "resolved",
+  ],
+  MESSAGE_REPORT_DISMISSED: [
+    "status",
+    ["reviewing"],
+    "dismissed",
+  ],
   TUTOR_APPROVED: [
     "approval_status",
     ["pending", "rejected"],
@@ -147,6 +166,30 @@ function validateChanges(record) {
   }
 
   const keys = Object.keys(previous).sort();
+
+  // Access audits preserve the current report status.
+  if (record.action === "MESSAGE_REPORT_VIEWED") {
+    if (
+      keys.length !== 1 ||
+      keys[0] !== "status" ||
+      Object.keys(next).length !== 1 ||
+      !Object.hasOwn(next, "status") ||
+      ![
+        "pending",
+        "reviewing",
+        "resolved",
+        "dismissed",
+      ].includes(previous.status) ||
+      previous.status !== next.status
+    ) {
+      invalid();
+    }
+
+    return {
+      previousValues: { status: previous.status },
+      newValues: { status: next.status },
+    };
+  }
 
   if (
     keys.length === 0 ||

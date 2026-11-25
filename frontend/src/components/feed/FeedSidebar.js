@@ -5,6 +5,8 @@ import { isPlatformLinkActive } from "@/lib/platformRoutes";
 
 import Link from "next/link";
 import { Icon } from "../Icons";
+import { useUnreadMessages } from "@/context/UnreadMessagesContext";
+import UnreadMessageBadge from "@/components/messaging/UnreadMessageBadge";
 
 // Navigation for the TuLinkUp learning feed.
 const navigation = [
@@ -36,8 +38,8 @@ const navigation = [
   },
   {
     label: "Messages",
+    href: "/messages",
     icon: "message",
-    comingSoon: true,
   },
   {
     label: "Saved posts",
@@ -53,6 +55,7 @@ const navigation = [
 
 export default function FeedSidebar() {
   const pathname = usePathname();
+  const { unreadCount } = useUnreadMessages();
   return (
     <aside className="hidden min-w-0 lg:sticky lg:top-24 lg:block lg:self-start lg:max-h-[calc(100dvh-7rem)] lg:overflow-y-auto">
       <div className="space-y-4">
@@ -81,6 +84,12 @@ export default function FeedSidebar() {
                     {item.label}
                   </span>
 
+                  {item.href === "/messages" && (
+                    <UnreadMessageBadge
+                      count={unreadCount}
+                    />
+                  )}
+
                   {item.comingSoon && (
                     <span className="text-[10px] font-medium">
                       Soon
@@ -106,6 +115,12 @@ export default function FeedSidebar() {
                 <Link
                   key={item.label}
                   href={item.href}
+                  aria-label={
+                    item.href === "/messages" &&
+                    unreadCount > 0
+                      ? `Messages, ${unreadCount} unread`
+                      : undefined
+                  }
                   aria-current={
                     active ? (pathname === item.href ? "page" : "location") : undefined
                   }

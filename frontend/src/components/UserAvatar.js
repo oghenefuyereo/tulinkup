@@ -5,15 +5,13 @@ import Image from "next/image";
 import { Icon } from "./Icons";
 import { useAuth } from "@/context/AuthContext";
 
-// Display the authenticated user's profile picture.
-export function UserAvatar({
+// Reusable avatar for authenticated users and conversation participants.
+export function ProfileAvatar({
+  imageUrl = null,
   size = 44,
   className = "",
 }) {
-  const { user } = useAuth();
   const [failedUrl, setFailedUrl] = useState(null);
-
-  const imageUrl = user?.profileImageUrl;
 
   // Only allow images from the existing profile image bucket.
   let validImage = false;
@@ -67,5 +65,22 @@ export function UserAvatar({
         />
       )}
     </span>
+  );
+}
+
+
+// Preserve the existing authenticated user avatar interface.
+export function UserAvatar({
+  size = 44,
+  className = "",
+}) {
+  const { user } = useAuth();
+
+  return (
+    <ProfileAvatar
+      imageUrl={user?.profileImageUrl}
+      size={size}
+      className={className}
+    />
   );
 }

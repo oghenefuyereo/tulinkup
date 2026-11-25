@@ -1,3 +1,5 @@
+import MessageTutorButton from "@/components/messaging/MessageTutorButton";
+
 
 // Import Image to display tutor profile pictures.
 import Image from "next/image";
@@ -368,6 +370,10 @@ export default async function TutorProfilePage({ params }) {
                 >
                   Book a session
                 </Link>
+
+                <MessageTutorButton
+                  tutorUserId={tutor.userId}
+                />
 
                 {/* Explain that payments are not included in the current MVP. */}
                 <p className="mt-3 text-center text-xs text-[#8490a4]">

@@ -5,6 +5,8 @@
 // Import React hooks to manage state and load user information.
 import { useState } from "react";
 import { useAuth } from "@/context/AuthContext";
+import { useUnreadMessages } from "@/context/UnreadMessagesContext";
+import UnreadMessageBadge from "@/components/messaging/UnreadMessageBadge";
 
 // Import Link for navigation between pages.
 import Link from "next/link";
@@ -25,6 +27,7 @@ export function Header() {
 
   // Store information about the currently logged-in user.
   const { user, clearUser } = useAuth();
+  const { unreadCount } = useUnreadMessages();
 
   // Get the current page path.
   const pathname = usePathname();
@@ -150,16 +153,24 @@ export function Header() {
               <Icon name="bell" className="h-5 w-5" />
             </button>
 
-            {/* Messaging will be implemented in Step 199. */}
-            <button
-              type="button"
-              disabled
-              title="Messages coming soon"
-              aria-label="Messages coming soon"
-              className="grid h-8 w-8 cursor-not-allowed place-items-center text-[#68758c] sm:h-10 sm:w-10"
+            {/* Private messaging with live unread counts. */}
+            <Link
+              href="/messages"
+              title="Messages"
+              aria-label={
+                unreadCount > 0
+                  ? `Messages, ${unreadCount} unread`
+                  : "Messages"
+              }
+              className="relative grid h-10 w-10 shrink-0 place-items-center rounded-full text-[#26469b] transition hover:bg-[#edf1fa]"
             >
               <Icon name="message" className="h-5 w-5" />
-            </button>
+
+              <UnreadMessageBadge
+                count={unreadCount}
+                variant="overlay"
+              />
+            </Link>
 
             <Link
               href={user ? "/profile" : "/login"}
