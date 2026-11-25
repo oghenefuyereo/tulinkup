@@ -1,100 +1,159 @@
-
-// Import crypto to create unique names for uploaded images.
 const crypto = require("crypto");
-const path = require("path");
-
-// Import the database connection and Supabase client.
 const pool = require("../config/db");
 const supabase = require("../config/supabase");
+const {
+  processProfileImage,
+} = require("../utils/profileImage");
 
-// Define the image formats tutors are allowed to upload.
-const ALLOWED_TYPES = {
-  "image/jpeg": ".jpg",
-  "image/png": ".png",
-  "image/webp": ".webp",
-};
+const BUCKET = "profile-images";
 
-// Allow tutors to upload a profile picture.
-async function uploadProfileImage(req, res) {
-  // Keep track of the uploaded file in case we need to remove it.
-  let uploadedPath = null;
+// Only accept storage paths belonging to the authenticated tutor.
+function getOwnedImagePath(imageUrl, userId) {
+  if (!imageUrl) return null;
 
   try {
-    // Only tutors can upload a profile picture through this endpoint.
-    if (req.user?.role !== "tutor") {
-      return res.status(403).json({
-        error: "Tutor access required.",
-      });
-    }
+    const url = new URL(imageUrl);
 
-    // Make sure the tutor selected an image.
-    if (!req.file) {
-      return res.status(400).json({
-        error: "Please select an image.",
-      });
-    }
-
-    // Check the file type and get its matching extension.
-    const extension = ALLOWED_TYPES[req.file.mimetype];
-
-    // Reject files that are not in one of the supported formats.
-    if (!extension) {
-      return res.status(400).json({
-        error: "Only JPEG, PNG, and WebP images are supported.",
-      });
-    }
-
-    // Get the ID of the logged-in tutor.
-    const userId = req.user.userId;
-
-    // Check whether the tutor has already created a profile.
-    const profile = await pool.query(
-      `SELECT id
-       FROM public.tutor_profiles
-       WHERE user_id = $1
-       LIMIT 1`,
-      [userId]
+    const prefix = new URL(
+      supabase.storage.from(BUCKET)
+        .getPublicUrl(`${userId}/`).data.publicUrl
     );
 
-    // Require a tutor profile before allowing an image upload.
-    if (!profile.rows.length) {
+    if (
+      url.origin !== prefix.origin ||
+      !url.pathname.startsWith(prefix.pathname)
+    ) {
+      return null;
+    }
+
+    const filename = url.pathname.slice(
+      prefix.pathname.length
+    );
+
+    if (
+      !/^[a-f0-9-]{36}\.(webp|jpg|jpeg|png)$/i.test(filename)
+    ) {
+      return null;
+    }
+
+    return `${userId}/${filename}`;
+  } catch {
+    return null;
+  }
+}
+
+// Remove an obsolete image without changing a successful response.
+async function cleanupImage(path) {
+  if (!path) return;
+
+  try {
+    const { error } = await supabase.storage
+      .from(BUCKET)
+      .remove([path]);
+
+    if (error) throw error;
+  } catch {
+    console.error("Profile image cleanup failed:", path);
+  }
+}
+
+// Retrieve the authenticated tutor's current profile image.
+async function getProfile(userId) {
+  const result = await pool.query(
+    `SELECT id, profile_image_url
+     FROM public.tutor_profiles
+     WHERE user_id = $1
+     LIMIT 1`,
+    [userId]
+  );
+
+  return result.rows[0] || null;
+}
+
+// Prevent simultaneous requests from overwriting newer changes.
+async function changeProfileImage(userId, oldUrl, newUrl) {
+  const result = await pool.query(
+    `UPDATE public.tutor_profiles
+     SET profile_image_url = $1
+     WHERE user_id = $2
+       AND profile_image_url IS NOT DISTINCT FROM $3
+     RETURNING id`,
+    [newUrl, userId, oldUrl]
+  );
+
+  return result.rowCount === 1;
+}
+
+// Upload or replace a tutor's profile image.
+async function uploadProfileImage(req, res) {
+  const userId = req.user?.userId;
+
+  if (!userId || req.user?.role !== "tutor") {
+    return res.status(403).json({
+      error: "Tutor access required.",
+    });
+  }
+
+  let uploadedPath = null;
+  let databaseUpdateStarted = false;
+
+  try {
+    const profile = await getProfile(userId);
+
+    if (!profile) {
       return res.status(400).json({
         error: "Create your tutor profile first.",
       });
     }
 
-    // Give the image a unique name and place it in the tutor's folder.
-    uploadedPath = `${userId}/${crypto.randomUUID()}${extension}`;
+    // Validate the actual image content and compress it.
+    const processed = await processProfileImage(req.file);
 
-    // Upload the image to the profile-images bucket in Supabase Storage.
+    const path =
+      `${userId}/${crypto.randomUUID()}.webp`;
+
     const { error: uploadError } = await supabase.storage
-      .from("profile-images")
-      .upload(uploadedPath, req.file.buffer, {
-        contentType: req.file.mimetype,
+      .from(BUCKET)
+      .upload(path, processed.buffer, {
+        contentType: processed.contentType,
         upsert: false,
+        cacheControl: "3600",
       });
 
-    // Stop the process if Supabase cannot upload the image.
-    if (uploadError) {
-      throw uploadError;
-    }
+    if (uploadError) throw uploadError;
 
-    // Get the public URL of the uploaded image.
+    uploadedPath = path;
+
     const { data } = supabase.storage
-      .from("profile-images")
-      .getPublicUrl(uploadedPath);
+      .from(BUCKET)
+      .getPublicUrl(path);
 
     const imageUrl = data.publicUrl;
 
-    // Save the image URL in the tutor's database profile.
-    await pool.query(
-      `UPDATE public.tutor_profiles
-       SET profile_image_url = $1
-       WHERE user_id = $2`,
-      [imageUrl, userId]
+    databaseUpdateStarted = true;
+
+    const updated = await changeProfileImage(
+      userId,
+      profile.profile_image_url,
+      imageUrl
     );
 
-    // Confirm the upload and return the image information.
+    if (!updated) {
+      await cleanupImage(uploadedPath);
+
+      return res.status(409).json({
+        error: "Your profile changed. Please try again.",
+      });
+    }
+
+    // Remove the previous image only after saving the new URL.
+    await cleanupImage(
+      getOwnedImagePath(
+        profile.profile_image_url,
+        userId
+      )
+    );
+
     return res.json({
       success: true,
       message: "Profile image uploaded successfully.",
@@ -104,15 +163,19 @@ async function uploadProfileImage(req, res) {
       },
     });
   } catch (error) {
-    // Remove the uploaded image if an error happens during the process.
-    if (uploadedPath) {
-      await supabase.storage
-        .from("profile-images")
-        .remove([uploadedPath]);
+    // Avoid deleting an image if the database update outcome
+    // is uncertain.
+    if (uploadedPath && !databaseUpdateStarted) {
+      await cleanupImage(uploadedPath);
     }
 
-    // Log the error to help identify what went wrong.
-    console.error("Media upload error:", error);
+    if ([400, 413, 415].includes(error.status)) {
+      return res.status(error.status).json({
+        error: error.message,
+      });
+    }
+
+    console.error("Profile image upload failed.");
 
     return res.status(500).json({
       error: "Unable to upload profile image.",
@@ -120,5 +183,61 @@ async function uploadProfileImage(req, res) {
   }
 }
 
-// Export the function so it can be used in the media routes.
-module.exports = { uploadProfileImage };
+// Remove a tutor's profile image.
+async function removeProfileImage(req, res) {
+  const userId = req.user?.userId;
+
+  if (!userId || req.user?.role !== "tutor") {
+    return res.status(403).json({
+      error: "Tutor access required.",
+    });
+  }
+
+  try {
+    const profile = await getProfile(userId);
+
+    if (!profile) {
+      return res.status(404).json({
+        error: "Tutor profile not found.",
+      });
+    }
+
+    if (profile.profile_image_url) {
+      const updated = await changeProfileImage(
+        userId,
+        profile.profile_image_url,
+        null
+      );
+
+      if (!updated) {
+        return res.status(409).json({
+          error: "Your profile changed. Please try again.",
+        });
+      }
+
+      await cleanupImage(
+        getOwnedImagePath(
+          profile.profile_image_url,
+          userId
+        )
+      );
+    }
+
+    return res.json({
+      success: true,
+      message: "Profile image removed successfully.",
+      image: null,
+    });
+  } catch {
+    console.error("Profile image removal failed.");
+
+    return res.status(500).json({
+      error: "Unable to remove profile image.",
+    });
+  }
+}
+
+module.exports = {
+  uploadProfileImage,
+  removeProfileImage,
+};

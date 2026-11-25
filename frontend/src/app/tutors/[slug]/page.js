@@ -126,7 +126,7 @@ export default async function TutorProfilePage({ params }) {
                 <div className="flex flex-col gap-6 p-6 sm:flex-row sm:p-8">
                   {/* Display the tutor's profile picture if one is available. */}
                   <div className="relative h-36 w-36 shrink-0 overflow-hidden rounded-[28px] bg-[#edf1f7]">
-                    {tutor.image?.url && (
+                    {tutor.image?.url ? (
                       <Image
                         src={tutor.image.url}
                         alt={tutor.image.alt || name}
@@ -134,6 +134,17 @@ export default async function TutorProfilePage({ params }) {
                         className="object-cover"
                         sizes="144px"
                       />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center bg-[#e8eefb]">
+                        <span className="text-4xl font-extrabold text-[#26469b]">
+                          {(name || "Tutor")
+                            .trim()
+                            .split(/\s+/)
+                            .slice(0, 2)
+                            .map((part) => part.charAt(0).toUpperCase())
+                            .join("")}
+                        </span>
+                      </div>
                     )}
                   </div>
 

@@ -215,20 +215,7 @@ export async function POST(request) {
         );
       }
 
-      // Check whether the tutor selected a profile image.
-      const image = form.get("profileImage");
-
-      // Prevent image uploads until this feature is configured.
-      if (image instanceof File && image.size > 0) {
-        return NextResponse.json(
-          {
-            error:
-              "Profile image uploads are not configured yet. Save your profile without an image.",
-          },
-          { status: 400 }
-        );
-      }
-
+      // Profile images are managed through /api/profile/image.
       // Add the tutor's additional details to the profile information.
       Object.assign(profileData, {
         title,

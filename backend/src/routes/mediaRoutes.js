@@ -1,55 +1,97 @@
-
-// Import Express to create routes for uploading media files.
 const express = require("express");
-
-// Import Multer to handle image uploads.
 const multer = require("multer");
 
-// Import the middleware that checks whether a user is logged in.
 const { protect } = require("../middleware/authMiddleware");
 
-// Import the function that handles profile image uploads.
 const {
   uploadProfileImage,
+  removeProfileImage,
 } = require("../controllers/mediaController");
 
-// Create a router to handle media upload requests.
+const {
+  MAX_IMAGE_BYTES,
+  ALLOWED_IMAGE_TYPES,
+} = require("../utils/profileImage");
+
 const router = express.Router();
 
-// Configure Multer to handle uploaded images.
+// Reject unauthorized users before processing uploaded files.
+function requireTutor(req, res, next) {
+  if (!req.user?.userId || req.user.role !== "tutor") {
+    return res.status(403).json({
+      error: "Tutor access required.",
+    });
+  }
+
+  next();
+}
+
+// Restrict uploaded files and temporary memory usage.
 const upload = multer({
-  // Temporarily store uploaded images in memory.
   storage: multer.memoryStorage(),
 
-  // Limit each uploaded image to 5 MB.
   limits: {
-    fileSize: 5 * 1024 * 1024,
+    fileSize: MAX_IMAGE_BYTES,
+    files: 1,
+    fields: 0,
+    parts: 2,
   },
 
-  // Check the image type before accepting the upload.
   fileFilter(req, file, callback) {
-    // Allow only JPEG, PNG, and WebP images.
     if (
-      ["image/jpeg", "image/png", "image/webp"].includes(
-        file.mimetype
-      )
+      Object.hasOwn(ALLOWED_IMAGE_TYPES, file.mimetype)
     ) {
-      // Accept the image if its file type is supported.
-      callback(null, true);
-    } else {
-      // Reject the upload if the image type is not supported.
-      callback(new Error("Unsupported image type."));
+      return callback(null, true);
     }
+
+    const error = new Error(
+      "Only JPEG, PNG, and WebP images are supported."
+    );
+
+    error.status = 415;
+
+    return callback(error);
   },
 });
 
-// Protected route to upload a user's profile image.
+// Convert upload errors into appropriate HTTP responses.
+function parseProfileImage(req, res, next) {
+  upload.single("image")(req, res, (error) => {
+    if (!error) return next();
+
+    if (error.code === "LIMIT_FILE_SIZE") {
+      return res.status(413).json({
+        error: "Profile images must not exceed 4 MiB.",
+      });
+    }
+
+    if (error.status === 415) {
+      return res.status(415).json({
+        error: error.message,
+      });
+    }
+
+    return res.status(400).json({
+      error: "Invalid profile image upload.",
+    });
+  });
+}
+
+// Upload or replace a profile image.
 router.post(
   "/profile-image",
   protect,
-  upload.single("image"),
+  requireTutor,
+  parseProfileImage,
   uploadProfileImage
 );
 
-// Export the router so it can be used in the main server.
+// Remove a profile image.
+router.delete(
+  "/profile-image",
+  protect,
+  requireTutor,
+  removeProfileImage
+);
+
 module.exports = router;

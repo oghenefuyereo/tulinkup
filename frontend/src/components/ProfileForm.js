@@ -1,6 +1,8 @@
 // Enable client-side interactions in this component.
 "use client";
 
+import { ProfileImageUpload } from "./ProfileImageUpload";
+
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -276,6 +278,12 @@ export function ProfileForm({ user, profile, subjects = [] }) {
             Professional tutor profile
           </h2>
 
+          <ProfileImageUpload
+            profile={profile}
+            fullName={user.fullName || user.full_name}
+            disabled={state.loading}
+          />
+
           {/* Display professional information fields. */}
           <div className="mt-6 grid gap-5 sm:grid-cols-2">
             {/* Allow tutors to enter their professional title. */}
@@ -343,24 +351,7 @@ export function ProfileForm({ user, profile, subjects = [] }) {
               )}
             </label>
 
-            {/* Display the profile image upload field. */}
-            <label>
-              <span className="form-label">
-                Profile image
-              </span>
-              <input
-                name="profileImage"
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                className="form-input file:mr-3 file:border-0 file:bg-transparent file:text-sm file:font-bold file:text-[#26469b]"
-              />
 
-              {/* Explain that image uploads are not supported yet. */}
-              <span className="mt-1 block text-xs text-[#71809a]">
-                Image uploads are not available yet.
-                Leave this field empty when saving.
-              </span>
-            </label>
           </div>
 
           {/* Display estimated earnings from private tutoring. */}
