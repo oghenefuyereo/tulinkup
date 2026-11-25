@@ -43,7 +43,7 @@ function invalid() {
 }
 
 // Validate pagination against the original request.
-function validatePagination(value, query, length) {
+export function validatePagination(value, query, length) {
   if (!validObject(value)) {
     invalid();
   }

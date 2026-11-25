@@ -2,7 +2,6 @@ import Link from "next/link";
 
 // Keep administrator navigation separate from student and tutor dashboards.
 const modules = [
-  "Audit logs",
   "Settings",
 ];
 
@@ -106,6 +105,19 @@ export function AdminDashboardShell({ name, children, activePage = "overview" })
                 }
               >
                 Group classes
+              </Link>
+
+              <Link
+                href="/dashboard/admin/audit-logs"
+                aria-current={
+                  activePage === "audit-logs" ? "page" : undefined
+                }
+                className={
+                  "block rounded-xl px-4 py-3 font-bold text-white " +
+                  (activePage === "audit-logs" ? "bg-[#26469b]" : "")
+                }
+              >
+                Audit logs
               </Link>
 
               <div className="grid grid-cols-2 gap-1 lg:grid-cols-1">
