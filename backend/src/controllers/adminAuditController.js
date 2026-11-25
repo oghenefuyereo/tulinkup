@@ -313,17 +313,24 @@ async function getAdminAuditLogs(req, res) {
     );
 
     if (administrator.rowCount !== 1) {
+      // Discard the connection unless the rollback is confirmed.
+      discard = true;
+
+      if (connectionFailed) {
+        throw new Error("Audit database connection failed.");
+      }
+
       const rollback = await client.query("ROLLBACK");
 
       if (
         connectionFailed ||
         rollback?.command !== "ROLLBACK"
       ) {
-        discard = true;
         throw new Error("Audit rollback failed.");
       }
 
       transactionStarted = false;
+      discard = false;
 
       return res.status(403).json({
         success: false,
