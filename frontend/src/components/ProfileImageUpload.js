@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useAuth } from "@/context/AuthContext";
 
 const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 
@@ -17,6 +18,7 @@ export function ProfileImageUpload({
   disabled = false,
 }) {
   const router = useRouter();
+  const { refreshUser } = useAuth();
   const inputRef = useRef(null);
   const busyRef = useRef(false);
 
@@ -143,6 +145,9 @@ export function ProfileImageUpload({
           ? "Profile image removed successfully."
           : "Profile image uploaded successfully."
       );
+
+      // Refresh all connected account avatars.
+      await refreshUser();
 
       router.refresh();
     } catch (error) {

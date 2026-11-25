@@ -261,9 +261,17 @@ const getMe = async (req, res) => {
   try {
     // Use the authenticated user's ID to find their account.
     const result = await pool.query(
-      `SELECT id, full_name, email, role
-       FROM public.users
-       WHERE id = $1`,
+      `SELECT
+         u.id,
+         u.full_name,
+         u.email,
+         u.role,
+         tp.profile_image_url
+       FROM public.users u
+       LEFT JOIN public.tutor_profiles tp
+         ON tp.user_id = u.id
+         AND u.role = 'tutor'
+       WHERE u.id = $1`,
       [req.user.userId]
     );
 

@@ -1,3 +1,5 @@
+import { UserAvatar } from "@/components/UserAvatar";
+
 
 // Import Link to navigate between dashboard pages.
 import Link from "next/link";
@@ -95,14 +97,18 @@ export function DashboardShell({
           <aside className="hidden lg:block">
             <div className="panel sticky top-24 p-4">
               {/* Display the user's account role and name. */}
-              <div className="border-b border-[#edf0f5] px-3 pb-5">
-                <p className="text-xs font-bold uppercase tracking-wider text-[#8190a8]">
-                  {role} account
-                </p>
+              <div className="flex items-center gap-3 border-b border-[#edf0f5] px-3 pb-5">
+                <UserAvatar size={48} />
 
-                <p className="mt-1 break-words font-extrabold">
-                  {name}
-                </p>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-bold uppercase tracking-wider text-[#8190a8]">
+                    {role} account
+                  </p>
+
+                  <p className="mt-1 break-words font-extrabold">
+                    {name}
+                  </p>
+                </div>
               </div>
 
               {/* Display navigation links for the user's dashboard. */}

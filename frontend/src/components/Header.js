@@ -3,7 +3,8 @@
 "use client";
 
 // Import React hooks to manage state and load user information.
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useAuth } from "@/context/AuthContext";
 
 // Import Link for navigation between pages.
 import Link from "next/link";
@@ -15,6 +16,7 @@ import { isPlatformRoute } from "@/lib/platformRoutes";
 // Import the icons and logo used in the header.
 import { Icon } from "./Icons";
 import { Logo } from "./Logo";
+import { UserAvatar } from "./UserAvatar";
 
 // Create the main navigation header for TuLinkUp.
 export function Header() {
@@ -22,51 +24,10 @@ export function Header() {
   const [open, setOpen] = useState(false);
 
   // Store information about the currently logged-in user.
-  const [user, setUser] = useState(null);
+  const { user, clearUser } = useAuth();
 
   // Get the current page path.
   const pathname = usePathname();
-
-  // Check the user's login status when the page path changes.
-  useEffect(() => {
-    // Track whether this effect is still active.
-    let active = true;
-
-    // Retrieve the currently authenticated user.
-    async function loadUser() {
-      try {
-        // Request the user's information from the authentication API.
-        const response = await fetch("/api/auth/me", {
-          cache: "no-store",
-        });
-
-        // Clear user information if the request is unsuccessful.
-        if (!response.ok) {
-          if (active) setUser(null);
-          return;
-        }
-
-        // Read the user information returned by the API.
-        const data = await response.json();
-
-        // Update the user state if the component is still active.
-        if (active) {
-          setUser(data.user ?? null);
-        }
-      } catch {
-        // Clear user information if the request fails.
-        if (active) setUser(null);
-      }
-    }
-
-    // Check the user's authentication status.
-    loadUser();
-
-    // Prevent outdated requests from updating the user state.
-    return () => {
-      active = false;
-    };
-  }, [pathname]);
 
   // Send each user to the dashboard for their account role.
   const dashboards = {
@@ -125,7 +86,7 @@ export function Header() {
       }
 
       // Clear the user's information and close the mobile menu.
-      setUser(null);
+      clearUser();
       setOpen(false);
 
       // Redirect the user to the homepage after logging out.
@@ -164,7 +125,7 @@ export function Header() {
               aria-label="Search tutors by name or subject"
               placeholder="Find a tutor"
               maxLength={200}
-              className="min-w-0 flex-1 bg-transparent text-sm text-[#17233d] outline-none placeholder:text-[#68758c]"
+              className="min-w-0 flex-1 appearance-none border-0 bg-transparent p-0 text-sm text-[#17233d] !outline-none !ring-0 !shadow-none focus:!outline-none focus:!ring-0 focus:!shadow-none placeholder:text-[#68758c]"
             />
 
             <button
@@ -204,7 +165,7 @@ export function Header() {
               aria-label={user ? "My profile" : "Log in"}
               className="hidden h-10 w-10 place-items-center rounded-full bg-[#f0f3f9] text-[#173472] lg:grid"
             >
-              <Icon name="user" className="h-5 w-5" />
+              <UserAvatar size={40} />
             </Link>
 
             {/* Preserve account and dashboard access. */}
@@ -232,6 +193,20 @@ export function Header() {
           >
             {user ? (
               <>
+                <div className="flex items-center gap-3 border-b border-[#e7eaf1] px-2 pb-4">
+                  <UserAvatar size={48} />
+
+                  <div className="min-w-0 flex-1">
+                    <p className="break-words text-sm font-extrabold text-[#17233d]">
+                      {user.fullName}
+                    </p>
+
+                    <p className="mt-1 text-xs font-semibold capitalize text-[#68758c]">
+                      {user.role} account
+                    </p>
+                  </div>
+                </div>
+
                 <Link
                   href={dashboard}
                   onClick={() => setOpen(false)}

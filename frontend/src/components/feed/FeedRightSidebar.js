@@ -150,7 +150,7 @@ export function FeedRightSidebar({
   return (
     <aside
       aria-label="Learning recommendations"
-      className="hidden min-w-0 space-y-4 xl:block"
+      className="hidden min-w-0 space-y-4 xl:sticky xl:top-24 xl:block xl:self-start xl:max-h-[calc(100dvh-7rem)] xl:overflow-y-auto"
     >
       {/* Real approved tutor recommendations. */}
       <SidebarSection

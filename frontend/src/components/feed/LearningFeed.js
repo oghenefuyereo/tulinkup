@@ -1,5 +1,7 @@
 "use client";
 
+import { UserAvatar } from "@/components/UserAvatar";
+
 import { useState } from "react";
 import Link from "next/link";
 import { Icon } from "../Icons";
@@ -133,12 +135,7 @@ export function LearningFeed({
         </p>
 
         <div className="mt-5 flex items-center gap-3">
-          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[#edf1fa]">
-            <Icon
-              name="user"
-              className="h-6 w-6 text-[#26469b]"
-            />
-          </div>
+          <UserAvatar size={44} />
 
           <button
             type="button"

@@ -54,6 +54,10 @@ export async function GET() {
         id: user.id,
         fullName: user.full_name,
         role: user.role,
+        profileImageUrl:
+          user.role === "tutor"
+            ? user.profile_image_url ?? null
+            : null,
       },
     });
   } catch (error) {
