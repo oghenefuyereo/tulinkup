@@ -1,3 +1,18 @@
+
+const {
+  validateTutorId,
+  lockEligibleTutor,
+} = require("../services/tutorEligibilityService");
+
+const {
+  beginBookingTransaction,
+  lockActiveBookingUser,
+  commitBookingTransaction,
+  rollbackBookingTransaction,
+  abortBookingTransaction,
+  releaseBookingConnection,
+} = require("../services/bookingTransactionService");
+
 // Import the database connection.
 const pool = require("../config/db");
 
@@ -372,6 +387,8 @@ async function getUser(client, userId) {
     SELECT id, full_name, role
     FROM public.users
     WHERE id = $1
+      AND account_status = 'active'
+    FOR SHARE
     `,
     [userId]
   );
@@ -407,6 +424,12 @@ async function handleSession(req, res, action) {
     );
   }
 
+  try {
+    validateTutorId(id);
+  } catch {
+    return fail(res, 400, "Invalid classroom ID.");
+  }
+
   if (!req.user?.userId) {
     return fail(
       res,
@@ -418,13 +441,18 @@ async function handleSession(req, res, action) {
   let client;
 
   try {
-    client = await pool.connect();
+    client = await beginBookingTransaction();
 
-    await client.query("BEGIN");
+    // Keep the participant's account active throughout the request.
+    await lockActiveBookingUser(
+      client,
+      req.user.userId,
+      req.user.role
+    );
 
     // Roll back unsuccessful classroom requests.
     async function reject(status, message) {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
       return fail(res, status, message);
     }
 
@@ -484,6 +512,31 @@ async function handleSession(req, res, action) {
       );
     }
 
+    // Check whether the tutor can still provide tutoring.
+    let tutorEligible = false;
+
+    if (action !== "end") {
+      try {
+        await lockEligibleTutor(
+          classroom.tutor_id,
+          client
+        );
+
+        tutorEligible = true;
+      } catch (error) {
+        if (error.statusCode !== 409) {
+          throw error;
+        }
+
+        if (action !== "status") {
+          return await reject(
+            409,
+            "This tutor is not currently eligible to provide tutoring."
+          );
+        }
+      }
+    }
+
     // Retrieve the existing live session.
     let session = await getLiveSession(
       client,
@@ -512,6 +565,7 @@ async function handleSession(req, res, action) {
 
       const canStart =
         user.role === "tutor" &&
+        tutorEligible &&
         eligiblePayment &&
         activeClassroom &&
         insideAccessWindow &&
@@ -521,12 +575,13 @@ async function handleSession(req, res, action) {
         );
 
       const canJoin =
+        tutorEligible &&
         eligiblePayment &&
         session?.status === "live" &&
         activeClassroom &&
         insideAccessWindow;
 
-      await client.query("COMMIT");
+      await commitBookingTransaction(client);
 
       return res.json({
         success: true,
@@ -663,7 +718,7 @@ async function handleSession(req, res, action) {
         fullName: user.full_name,
       });
 
-      await client.query("COMMIT");
+      await commitBookingTransaction(client);
 
       return res.json({
         success: true,
@@ -688,7 +743,7 @@ async function handleSession(req, res, action) {
 
       // Allow safe retries after completion.
       if (session.status === "completed") {
-        await client.query("COMMIT");
+        await commitBookingTransaction(client);
 
         return res.json({
           success: true,
@@ -760,7 +815,7 @@ async function handleSession(req, res, action) {
         );
       }
 
-      await client.query("COMMIT");
+      await commitBookingTransaction(client);
 
       return res.json({
         success: true,
@@ -775,15 +830,45 @@ async function handleSession(req, res, action) {
     );
   } catch (error) {
     if (client) {
-      await client
-        .query("ROLLBACK")
-        .catch(() => {});
+      try {
+        await abortBookingTransaction(client);
+      } catch (rollbackError) {
+        error = rollbackError;
+      }
     }
 
-    console.error(
-      "Live session error:",
-      error.message
-    );
+    if (error.code === "BOOKING_COMMIT_UNCERTAIN") {
+      return fail(
+        res,
+        503,
+        "The classroom outcome requires verification. Refresh before retrying."
+      );
+    }
+
+    if (
+      error.code === "BOOKING_ROLLBACK_FAILED" ||
+      ["55P03", "57014", "40P01"].includes(error.code)
+    ) {
+      return fail(
+        res,
+        503,
+        "The classroom service is temporarily unavailable."
+      );
+    }
+
+    if (error.statusCode === 403) {
+      return fail(res, 403, "An active account is required.");
+    }
+
+    if (error.statusCode === 400) {
+      return fail(res, 400, "Invalid classroom information.");
+    }
+
+    if (error.statusCode === 409) {
+      return fail(res, 409, "Classroom eligibility requirements are not met.");
+    }
+
+    console.error("Unable to process a classroom request.");
 
     return fail(
       res,
@@ -792,7 +877,7 @@ async function handleSession(req, res, action) {
     );
   } finally {
     if (client) {
-      client.release();
+      releaseBookingConnection(client);
     }
   }
 }

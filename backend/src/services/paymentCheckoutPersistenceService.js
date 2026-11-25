@@ -1,8 +1,13 @@
 const pool = require("../config/db");
 
 const {
+  validatePaymentSource,
+} = require("./paymentValidationService");
+
+const {
   validateId,
   withPaymentTransaction,
+  lockPaymentSource,
 } = require("./paymentTransactionService");
 
 const {
@@ -33,6 +38,40 @@ async function persistCheckoutSession(
   const studentId = validateId(user.userId, "student ID");
 
   return withPaymentTransaction(async (client) => {
+    // Find the student's payment before locking its tutoring source.
+    const reference = await client.query(
+      `SELECT payment_type, booking_id, enrollment_id
+       FROM public.payments
+       WHERE id = $1
+         AND student_id = $2
+         AND livemode = FALSE`,
+      [id, studentId]
+    );
+
+    if (reference.rows.length !== 1) {
+      const error = new Error("Payment not found.");
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const source = reference.rows[0];
+
+    if (!["one_on_one", "group"].includes(source.payment_type)) {
+      throw new Error("Invalid payment type.");
+    }
+
+    const sourceId =
+      source.payment_type === "one_on_one"
+        ? source.booking_id
+        : source.enrollment_id;
+
+    await lockPaymentSource(
+      source.payment_type,
+      sourceId,
+      user,
+      client
+    );
+
     const result = await client.query(
       `
       SELECT p.*
@@ -42,6 +81,7 @@ async function persistCheckoutSession(
       WHERE p.id = $1
         AND p.student_id = $2
         AND u.role = 'student'
+        AND u.account_status = 'active'
         AND p.livemode = false
       FOR UPDATE OF p
       `,
@@ -55,6 +95,23 @@ async function persistCheckoutSession(
     }
 
     const payment = result.rows[0];
+
+    const currentSourceId =
+      payment.payment_type === "one_on_one"
+        ? payment.booking_id
+        : payment.enrollment_id;
+
+    if (
+      payment.payment_type !== source.payment_type ||
+      String(currentSourceId) !== String(sourceId)
+    ) {
+      const error = new Error("Payment source has changed.");
+      error.statusCode = 409;
+      throw error;
+    }
+
+    // Recheck eligibility before allowing Checkout to continue.
+    await validatePaymentSource(payment, user, client);
 
     if (payment.payment_status !== "pending") {
       const error = new Error(
@@ -112,7 +169,13 @@ async function persistCheckoutSession(
       [session.id, id, studentId]
     );
 
-    if (updated.rows.length !== 1) {
+    if (
+      updated.command !== "UPDATE" ||
+      updated.rowCount !== 1 ||
+      updated.rows.length !== 1 ||
+      String(updated.rows[0].id) !== id ||
+      updated.rows[0].stripe_checkout_session_id !== session.id
+    ) {
       throw new Error(
         "Checkout Session association could not be saved."
       );

@@ -64,4 +64,9 @@ const pool = new Pool({
   ssl
 });
 
+// Handle unexpected errors from idle database connections.
+pool.on("error", () => {
+  console.error("An idle database connection failed.");
+});
+
 module.exports = pool;

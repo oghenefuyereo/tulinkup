@@ -5,14 +5,13 @@ const modules = [
   "All users",
   "Students",
   "Tutors",
-  "Tutor approvals",
   "Bookings",
   "Group classes",
   "Audit logs",
   "Settings",
 ];
 
-export function AdminDashboardShell({ name, children }) {
+export function AdminDashboardShell({ name, children, activePage = "overview" }) {
   return (
     <div className="min-h-screen bg-[#f7f9fd]">
       <div className="page-wrap grid gap-6 py-8 lg:grid-cols-[240px_minmax(0,1fr)]">
@@ -34,13 +33,29 @@ export function AdminDashboardShell({ name, children }) {
             >
               <Link
                 href="/dashboard/admin"
-                aria-current="page"
-                className="block rounded-xl bg-[#26469b] px-4 py-3 font-bold text-white"
+                aria-current={activePage === "overview" ? "page" : undefined}
+                className={
+    "block rounded-xl px-4 py-3 font-bold text-white " +
+    (activePage === "overview" ? "bg-[#26469b]" : "")
+  }
               >
                 Overview
               </Link>
 
-              {/* Enable each module when its page is ready. */}
+              <Link
+    href="/dashboard/admin/tutor-approvals"
+    aria-current={
+      activePage === "tutor-approvals" ? "page" : undefined
+    }
+    className={
+      "block rounded-xl px-4 py-3 font-bold text-white " +
+      (activePage === "tutor-approvals" ? "bg-[#26469b]" : "")
+    }
+  >
+    Tutor approvals
+  </Link>
+
+  {/* Enable the remaining modules when their pages are ready. */}
               <div className="grid grid-cols-2 gap-1 lg:grid-cols-1">
                 {modules.map((label) => (
                   <div

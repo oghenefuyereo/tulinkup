@@ -128,9 +128,29 @@ async function withAdminTransaction(
   let commitStarted = false;
   let releaseError;
 
+  // Protect the connection while an administrator operation is running.
+  function handleConnectionError() {
+    releaseError = new Error(
+      "Administrator database connection failed."
+    );
+  }
+
+  client.on("error", handleConnectionError);
+
   try {
     // Start the transaction before verifying the administrator.
-    await client.query("BEGIN");
+    const beginResult = await client.query("BEGIN");
+
+    if (
+      releaseError ||
+      !beginResult ||
+      beginResult.command !== "BEGIN"
+    ) {
+      throw adminTransactionError(
+        "Administrator transaction could not be started.",
+        503
+      );
+    }
     transactionStarted = true;
 
     // Prevent SQL statements and locks from waiting indefinitely.
@@ -149,6 +169,13 @@ async function withAdminTransaction(
     await lockActiveAdministrator(client, id);
 
     // Associate the transaction with the verified administrator.
+    if (releaseError) {
+      throw adminTransactionError(
+        "Administrator database connection unavailable.",
+        503
+      );
+    }
+
     activeTransactions.set(client, id);
 
     const result = await callback(client, id);
@@ -158,9 +185,14 @@ async function withAdminTransaction(
 
     commitStarted = true;
 
+    if (releaseError) {
+      throw releaseError;
+    }
+
     const commitResult = await client.query("COMMIT");
 
     if (
+      releaseError ||
       !commitResult ||
       commitResult.command !== "COMMIT"
     ) {
@@ -195,9 +227,14 @@ async function withAdminTransaction(
 
     if (transactionStarted) {
       try {
+        if (releaseError) {
+          throw releaseError;
+        }
+
         const rollbackResult = await client.query("ROLLBACK");
 
         if (
+          releaseError ||
           !rollbackResult ||
           rollbackResult.command !== "ROLLBACK"
         ) {
@@ -213,6 +250,15 @@ async function withAdminTransaction(
         releaseError = new Error(
           "Administrator transaction rollback failed."
         );
+
+        const rollbackError = adminTransactionError(
+          "Administrator operation could not be safely completed.",
+          503
+        );
+
+        rollbackError.code = "ADMIN_ROLLBACK_FAILED";
+
+        throw rollbackError;
       }
     } else {
       // Discard the connection if transaction startup failed.
@@ -226,6 +272,14 @@ async function withAdminTransaction(
   } finally {
     activeTransactions.delete(client);
     client.release(releaseError);
+
+    // Keep discarded connections protected during shutdown.
+    if (!releaseError) {
+      client.removeListener(
+        "error",
+        handleConnectionError
+      );
+    }
   }
 }
 

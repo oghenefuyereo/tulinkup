@@ -49,4 +49,14 @@ router.patch(
   changeTutorApproval
 );
 
+const {
+  changeAccountStatus,
+} = require("../controllers/adminAccountStatusController");
+
+// Allow administrators to manage student and tutor account status.
+router.patch(
+  "/users/:userId/status",
+  changeAccountStatus
+);
+
 module.exports = router;

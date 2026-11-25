@@ -1165,6 +1165,7 @@ async function getAdminTutors(req, res) {
         " SELECT u.id, u.full_name, u.email," +
         " u.role, u.account_status, u.created_at," +
 
+        " tp.id AS profile_id," +
         " (tp.id IS NOT NULL) AS has_profile," +
 
         " tp.approval_status," +
@@ -1188,6 +1189,7 @@ async function getAdminTutors(req, res) {
       " t.id, t.full_name, t.email," +
       " t.role, t.account_status, t.created_at," +
 
+      " t.profile_id," +
       " t.has_profile," +
       " t.approval_status," +
       " t.availability_status," +
@@ -1227,6 +1229,11 @@ async function getAdminTutors(req, res) {
         createdAt: tutor.created_at,
 
         hasProfile: tutor.has_profile,
+
+        profileId:
+          tutor.profile_id === null
+            ? null
+            : String(tutor.profile_id),
 
         approvalStatus: tutor.approval_status,
 
