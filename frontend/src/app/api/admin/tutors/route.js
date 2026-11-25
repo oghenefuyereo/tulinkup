@@ -8,7 +8,17 @@ const API_URL = (
 ).replace(/\/+$/, "");
 
 function reply(data, status = 200) {
-  return NextResponse.json(data, {
+  // Keep error responses consistent without exposing account records.
+  const payload = status >= 400
+    ? {
+        success: false,
+        error: typeof data?.error === "string"
+          ? data.error
+          : "Administrator request failed.",
+      }
+    : data;
+
+  return NextResponse.json(payload, {
     status,
     headers: { "Cache-Control": "no-store" },
   });

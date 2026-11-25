@@ -2,7 +2,6 @@ import Link from "next/link";
 
 // Keep administrator navigation separate from student and tutor dashboards.
 const modules = [
-  "All users",
   "Students",
   "Tutors",
   "Bookings",
@@ -56,6 +55,17 @@ export function AdminDashboardShell({ name, children, activePage = "overview" })
   </Link>
 
   {/* Enable the remaining modules when their pages are ready. */}
+              <Link
+                href="/dashboard/admin/users"
+                aria-current={activePage === "users" ? "page" : undefined}
+                className={
+                  "block rounded-xl px-4 py-3 font-bold text-white " +
+                  (activePage === "users" ? "bg-[#26469b]" : "")
+                }
+              >
+                All users
+              </Link>
+
               <div className="grid grid-cols-2 gap-1 lg:grid-cols-1">
                 {modules.map((label) => (
                   <div
