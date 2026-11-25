@@ -2,6 +2,11 @@
 const pool = require("../config/db");
 
 const {
+  requireEligibleTutor,
+  lockEligibleTutor,
+} = require("./tutorEligibilityService");
+
+const {
   PRICING,
   calculatePrivateSessionPrice,
   calculateRevenueSplit,
@@ -95,6 +100,13 @@ async function validateTutorPaymentAccount(
 ) {
   const id = validateId(tutorId, "tutor ID");
 
+  // Check approval before accepting a new tutoring payment.
+  if (db === pool) {
+    await requireEligibleTutor(id, db);
+  } else {
+    await lockEligibleTutor(id, db);
+  }
+
   const result = await db.query(
     `SELECT
        a.id,
@@ -111,6 +123,12 @@ async function validateTutorPaymentAccount(
      WHERE a.tutor_id = $1
        AND u.role = 'tutor'
        AND u.account_status = 'active'
+       AND EXISTS (
+         SELECT 1
+         FROM public.tutor_profiles tp
+         WHERE tp.user_id = u.id
+           AND tp.approval_status = 'approved'
+       )
        AND a.livemode = FALSE
      LIMIT 1`,
     [id]

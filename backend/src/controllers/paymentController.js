@@ -105,6 +105,25 @@ async function startCheckout(req, res) {
       paymentStatus: "pending",
     });
   } catch (error) {
+    if (error.code === "PAYMENT_COMMIT_UNCERTAIN") {
+      return res.status(503).json({
+        success: false,
+        code: "PAYMENT_COMMIT_UNCERTAIN",
+        message: "The payment outcome requires reconciliation."
+      });
+    }
+
+    if (
+      error.statusCode === 503 ||
+      ["55P03", "57014", "40P01"].includes(error.code)
+    ) {
+      return fail(
+        res,
+        503,
+        "Payment service temporarily unavailable."
+      );
+    }
+
     const status = [400, 401, 403, 404, 409].includes(
       error.statusCode
     )

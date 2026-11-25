@@ -115,9 +115,26 @@ async function withPaymentTransaction(
   let commitStarted = false;
   let releaseError;
 
+  // Keep connection errors handled until the client is released.
+  const handleConnectionError = () => {
+    releaseError = new Error(
+      "Payment database connection failed."
+    );
+  };
+
+  client.on("error", handleConnectionError);
+
   try {
     // Start the PostgreSQL transaction.
-    await client.query("BEGIN");
+    const beginResult = await client.query("BEGIN");
+
+    if (beginResult?.command !== "BEGIN" || releaseError) {
+      throw paymentError(
+        "Payment transaction could not be started.",
+        503
+      );
+    }
+
     transactionStarted = true;
 
     // Prevent transactions from waiting indefinitely for locks.
@@ -129,6 +146,14 @@ async function withPaymentTransaction(
     await client.query(
       "SET LOCAL statement_timeout = '15s'"
     );
+
+    await client.query(
+      "SET LOCAL idle_in_transaction_session_timeout = '30s'"
+    );
+
+    if (releaseError) {
+      throw releaseError;
+    }
 
     // Register the client as an active payment transaction.
     activeTransactionClients.add(client);
@@ -146,11 +171,16 @@ async function withPaymentTransaction(
     // Save all successful database changes.
     commitStarted = true;
 
+    if (releaseError) {
+      throw releaseError;
+    }
+
     const commitResult = await client.query("COMMIT");
 
     // Make sure PostgreSQL actually committed the transaction.
     // Missing or invalid responses require reconciliation.
     if (
+      releaseError ||
       !commitResult ||
       commitResult.command !== "COMMIT"
     ) {
@@ -189,15 +219,33 @@ async function withPaymentTransaction(
     // Undo database changes if the transaction fails.
     if (transactionStarted) {
       try {
-        await client.query("ROLLBACK");
-      } catch (rollbackError) {
-        // Discard the connection if rollback fails.
-        releaseError = rollbackError;
+        if (releaseError) {
+          throw releaseError;
+        }
 
-        console.error(
-          "Payment transaction rollback failed:",
-          rollbackError.code || "UNKNOWN_ERROR"
+        const rollbackResult = await client.query("ROLLBACK");
+
+        if (
+          releaseError ||
+          rollbackResult?.command !== "ROLLBACK"
+        ) {
+          throw new Error(
+            "Payment rollback could not be verified."
+          );
+        }
+      } catch {
+        releaseError = new Error(
+          "Payment transaction rollback failed."
         );
+
+        const rollbackError = paymentError(
+          "Payment transaction could not be safely completed.",
+          503
+        );
+
+        rollbackError.code = "PAYMENT_ROLLBACK_FAILED";
+
+        throw rollbackError;
       }
     } else {
       // Discard the connection if BEGIN fails.
@@ -215,6 +263,11 @@ async function withPaymentTransaction(
 
     // Always return or discard the database connection.
     client.release(releaseError);
+
+    // Discarded connections can still emit shutdown errors.
+    if (!releaseError) {
+      client.removeListener("error", handleConnectionError);
+    }
   }
 }
 
@@ -464,6 +517,27 @@ async function lockPaymentSource(
     user,
     client
   );
+
+  // Keep the student's account active throughout payment preparation.
+  const account = await client.query(
+    `SELECT id
+     FROM public.users
+     WHERE id = $1
+       AND role = 'student'
+       AND account_status = 'active'
+     FOR SHARE`,
+    [studentId]
+  );
+
+  if (
+    account.rows.length !== 1 ||
+    String(account.rows[0].id) !== studentId
+  ) {
+    throw paymentError(
+      "An active student account is required.",
+      403
+    );
+  }
 
   // Lock the private booking.
   if (type === "one_on_one") {

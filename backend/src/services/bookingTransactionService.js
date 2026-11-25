@@ -32,11 +32,13 @@ function watchBookingConnection(client, transaction) {
   transaction.handleConnectionError = handleError;
 }
 
-// Return the connection to the pool and remove our listener.
+// Keep discarded connections protected during shutdown.
 function releaseBookingConnection(client, transaction, error) {
-  try {
-    client.release(error || transaction.releaseError);
-  } finally {
+  const discardError = error || transaction.releaseError;
+
+  client.release(discardError);
+
+  if (!discardError) {
     client.removeListener(
       "error",
       transaction.handleConnectionError
