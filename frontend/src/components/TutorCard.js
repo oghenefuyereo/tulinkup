@@ -110,14 +110,14 @@ export function TutorCard({ tutor }) {
   return (
     <article className="group overflow-hidden rounded-[22px] border border-[#e5e9f0] bg-white shadow-[0_12px_35px_rgba(33,52,91,.07)] transition hover:-translate-y-1 hover:shadow-[0_18px_45px_rgba(33,52,91,.12)]">
       {/* Display the tutor's profile image and availability status. */}
-      <div className="relative h-52 overflow-hidden bg-[#eef2f8]">
+      <div className="relative aspect-square overflow-hidden bg-[#eef2f8]">
         {/* Show the profile image if one is available. */}
         {image ? (
           <Image
             src={image.url}
             alt={image.alt || name}
             fill
-            className="object-cover transition duration-500 group-hover:scale-105"
+            className="object-cover object-top"
             sizes="(max-width: 768px) 100vw, 33vw"
           />
         ) : (

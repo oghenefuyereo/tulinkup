@@ -34,8 +34,8 @@ export function Footer() {
             {/* Link to the tutor registration page. */}
             <Link href="/register?role=tutor">Become a tutor</Link>
 
-            {/* Link to the subjects section on the homepage. */}
-            <Link href="/#subjects">Subjects</Link>
+            {/* Link to subject discovery in the tutor marketplace. */}
+            <Link href="/tutors">Subjects</Link>
           </div>
         </div>
 
@@ -47,8 +47,6 @@ export function Footer() {
             {/* Explain how the tutoring platform works. */}
             <Link href="/#how-it-works">How it works</Link>
 
-            {/* Link to the success stories section. */}
-            <Link href="/#testimonials">Success stories</Link>
 
             {/* Link to the homepage for information about TuLinkUp. */}
             <Link href="/">About TuLinkUp</Link>

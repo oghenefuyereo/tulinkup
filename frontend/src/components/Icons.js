@@ -3,6 +3,36 @@
 export function Icon({ name, ...props }) {
   // Store the SVG shapes for each available icon.
   const paths = {
+    home: (
+      <>
+        <path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" />
+        <path d="M9 21v-7h6v7" />
+      </>
+    ),
+
+    courses: (
+      <>
+        <path d="m2 10 10-5 10 5-10 5z" />
+        <path d="M6 12v5c3 3 9 3 12 0v-5" />
+        <path d="M22 10v6" />
+      </>
+    ),
+
+    message: (
+      <path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5H4l2-4a8.5 8.5 0 1 1 15-4.5Z" />
+    ),
+
+    bookmark: (
+      <path d="M6 3h12v18l-6-4-6 4z" />
+    ),
+
+    bell: (
+      <>
+        <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
+        <path d="M10 21h4" />
+      </>
+    ),
+
     // Search icon used for finding tutors.
     search: (
       <>

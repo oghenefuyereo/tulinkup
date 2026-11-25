@@ -19,7 +19,7 @@ export default async function GroupClassDetailsPage({
 
   return (
     <main className="min-h-screen bg-[#f7f9fd]">
-      <div className="page-wrap py-10">
+      <div className="w-full min-w-0 py-4">
         <GroupClassDetails
           key={id}
           classId={id}

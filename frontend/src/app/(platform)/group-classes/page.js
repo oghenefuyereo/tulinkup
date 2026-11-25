@@ -13,7 +13,7 @@ export default function GroupClassesPage() {
     <main className="min-h-screen bg-[#f7f9fd]">
       {/* Hero section */}
       <section className="bg-[#173472] text-white">
-        <div className="page-wrap py-16 md:py-20">
+        <div className="w-full px-4 py-8">
           <div className="max-w-3xl">
             <p className="text-sm font-bold uppercase tracking-widest text-blue-200">
               TuLinkUp Group Learning
@@ -40,7 +40,7 @@ export default function GroupClassesPage() {
       </section>
 
       {/* Marketplace */}
-      <section className="page-wrap py-10">
+      <section className="w-full py-5">
         <GroupClassDiscovery />
       </section>
     </main>

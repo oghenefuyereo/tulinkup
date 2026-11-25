@@ -248,7 +248,7 @@ export default function GroupClassDiscovery() {
         </label>
 
         {/* Filters */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 @min-[420px]/platform:grid-cols-2 @min-[900px]/platform:grid-cols-4">
           <label className="space-y-2">
             <span className="text-sm font-bold">
               Subject
@@ -456,7 +456,7 @@ export default function GroupClassDiscovery() {
               </button>
             </div>
           ) : (
-            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-5 @min-[560px]/platform:grid-cols-2 @min-[1000px]/platform:grid-cols-3">
               {filteredClasses.map((item) => (
                 <GroupClassCard
                   key={item.id}

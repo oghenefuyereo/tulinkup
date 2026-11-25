@@ -7,6 +7,7 @@ import Link from "next/link";
 
 // Import usePathname to identify the current page.
 import { usePathname } from "next/navigation";
+import { isPlatformRoute } from "@/lib/platformRoutes";
 
 // Import the reusable icons used in the navigation.
 import { Icon } from "./Icons";
@@ -30,7 +31,7 @@ export function MobileNav({ role }) {
     : "/dashboard/student/group-classes";
 
   // Define the navigation items displayed on mobile devices.
-  const items = [
+  const dashboardItems = [
     // Link to the TuLinkUp homepage.
     {
       href: "/",
@@ -74,6 +75,20 @@ export function MobileNav({ role }) {
     },
   ];
 
+  const feedItems = [
+    { href: "/", label: "Home", icon: "home" },
+    { href: "/tutors", label: "Explore", icon: "search" },
+    { href: "/group-classes", label: "Classes", icon: "calendar" },
+    { href: "/courses", label: "Courses", icon: "courses" },
+    { href: "/profile", label: "Profile", icon: "user" },
+  ];
+
+  const isFeedPage = isPlatformRoute(pathname);
+
+  const items = isFeedPage
+    ? feedItems
+    : dashboardItems;
+
   // Find the most specific navigation item matching the current page.
   // This prevents multiple navigation items from being highlighted.
   const activeItem = items
@@ -95,7 +110,7 @@ export function MobileNav({ role }) {
       className="mobile-safe fixed inset-x-0 bottom-0 z-50 border-t-4 border-[#f5c518] bg-[#26469b] lg:hidden"
     >
       {/* Arrange the navigation items into six equal columns. */}
-      <div className="grid h-[68px] grid-cols-6">
+      <div className={`grid h-[68px] ${isFeedPage ? "grid-cols-5" : "grid-cols-6"}`}>
         {/* Create a navigation link for each item. */}
         {items.map((item) => {
           // Check whether this item matches the current page.

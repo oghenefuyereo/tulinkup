@@ -17,6 +17,14 @@ export default function TutorsPage() {
 
   // Manage search and filter values.
   const [search, setSearch] = useState("");
+
+  // Read search text submitted from the homepage.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const query = params.get("q") || params.get("subject") || "";
+
+    setSearch(query.trim().slice(0, 200));
+  }, []);
   const [subject, setSubject] = useState("all");
   const [price, setPrice] = useState("all");
   const [rating, setRating] = useState("all");
@@ -201,7 +209,7 @@ export default function TutorsPage() {
     "w-full rounded-xl border border-[#dce2ec] bg-white px-4 py-3 text-sm text-[#17233d] outline-none focus:border-[#26469b] focus:ring-2 focus:ring-[#26469b]/10";
 
   return (
-    <main className="min-h-screen bg-[#f7f9fd] px-5 py-16 text-[#17233d]">
+    <main className="min-w-0 bg-[#f7f9fd] py-2 text-[#17233d]">
       <div className="mx-auto max-w-7xl">
 
         {/* Marketplace heading */}
@@ -234,7 +242,7 @@ export default function TutorsPage() {
             className={filterStyle}
           />
 
-          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="mt-4 grid grid-cols-1 gap-3 @min-[420px]/platform:grid-cols-2 @min-[900px]/platform:grid-cols-5">
 
             {/* Subject filter */}
             <select
@@ -390,7 +398,7 @@ export default function TutorsPage() {
 
             {/* Tutor cards */}
             {filteredTutors.length > 0 ? (
-              <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+              <div className="grid grid-cols-1 gap-5 @min-[560px]/platform:grid-cols-2 @min-[1000px]/platform:grid-cols-3">
 
                 {filteredTutors.map((tutor) => (
                   <article
@@ -399,7 +407,7 @@ export default function TutorsPage() {
                   >
 
                     {/* Tutor profile image */}
-                    <div className="relative h-64 overflow-hidden bg-[#e9eef8]">
+                    <div className="relative aspect-square overflow-hidden bg-[#e9eef8]">
 
                       {tutor.image?.url ? (
                         <img

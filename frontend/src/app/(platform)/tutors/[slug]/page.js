@@ -9,9 +9,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 // Import the components used on the tutor profile page.
-import { Footer } from "@/components/Footer";
+
 import { Icon } from "@/components/Icons";
-import { MobileNav } from "@/components/MobileNav";
 
 // Make sure the page loads fresh information for each request.
 export const dynamic = "force-dynamic";
@@ -106,8 +105,8 @@ export default async function TutorProfilePage({ params }) {
   return (
     <>
       {/* Main container for the tutor profile page. */}
-      <main className="bg-[#f7f9fd] py-8 sm:py-12">
-        <div className="page-wrap">
+      <main className="min-w-0 bg-[#f7f9fd] py-2">
+        <div className="w-full min-w-0">
           {/* Provide a link back to the tutor discovery page. */}
           <Link
             href="/tutors"
@@ -117,13 +116,13 @@ export default async function TutorProfilePage({ params }) {
           </Link>
 
           {/* Organize the tutor's profile and booking details into columns. */}
-          <div className="mt-6 grid gap-7 lg:grid-cols-[1fr_360px]">
+          <div className="mt-6 grid min-w-0 gap-5 @min-[1000px]/platform:grid-cols-[minmax(0,1fr)_320px]">
             <div className="space-y-6">
               {/* Display the tutor's main profile information. */}
               <section className="panel overflow-hidden">
                 <div className="h-2 bg-[#f5c518]" />
 
-                <div className="flex flex-col gap-6 p-6 sm:flex-row sm:p-8">
+                <div className="flex flex-col gap-5 p-5 @min-[600px]/platform:flex-row">
                   {/* Display the tutor's profile picture if one is available. */}
                   <div className="relative h-36 w-36 shrink-0 overflow-hidden rounded-[28px] bg-[#edf1f7]">
                     {tutor.image?.url ? (
@@ -239,7 +238,7 @@ export default async function TutorProfilePage({ params }) {
 
               {/* Display the tutor's qualifications and teaching experience. */}
               <section className="panel p-6 sm:p-8">
-                <div className="grid gap-7 sm:grid-cols-2">
+                <div className="grid gap-5 @min-[560px]/platform:grid-cols-2">
                   <div>
                     <h2 className="text-lg font-extrabold">
                       Qualifications
@@ -381,10 +380,9 @@ export default async function TutorProfilePage({ params }) {
       </main>
 
       {/* Display the website footer. */}
-      <Footer />
 
       {/* Display the mobile navigation menu. */}
-      <MobileNav />
+
     </>
   );
 }

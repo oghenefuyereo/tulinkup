@@ -10,6 +10,7 @@ import Link from "next/link";
 
 // Import usePathname to detect changes in the current page.
 import { usePathname } from "next/navigation";
+import { isPlatformRoute } from "@/lib/platformRoutes";
 
 // Import the icons and logo used in the header.
 import { Icon } from "./Icons";
@@ -88,11 +89,13 @@ export function Header() {
     // Browse available group live classes.
     { href: "/group-classes", label: "Group Classes" },
 
+    // Courses are currently under development.
+    { href: "/courses", label: "Courses" },
+
     // Learn how TuLinkUp works.
     { href: "/#how-it-works", label: "How it works" },
 
-    // Explore available subjects.
-    { href: "/#subjects", label: "Subjects" },
+
   ];
 
   // Check whether a navigation link is currently active.
@@ -132,6 +135,174 @@ export function Header() {
       console.error("Logout error:", error);
       alert("Unable to log out. Please try again.");
     }
+  }
+
+  // Use the shared header across platform and dashboard pages.
+  const isDashboardRoute =
+    pathname === "/dashboard" ||
+    pathname.startsWith("/dashboard/");
+
+  if (isPlatformRoute(pathname) || isDashboardRoute) {
+    return (
+      <header
+        aria-label="TuLinkUp platform header"
+        className="sticky top-0 z-50 border-b border-[#e7eaf1] bg-white/95 backdrop-blur"
+      >
+        <div className="mx-auto flex min-h-[72px] max-w-[1440px] flex-wrap items-center justify-between gap-2 px-3 py-3 sm:flex-nowrap sm:gap-5 sm:px-6">
+          <Logo />
+
+          {/* Search tutors by name, subject, or expertise. */}
+          <form
+            action="/tutors"
+            method="GET"
+            role="search"
+            className="order-last flex h-11 w-full items-center gap-2 rounded-xl border border-[#e3e7ef] bg-[#f7f9fd] px-3 focus-within:border-[#26469b] sm:order-none sm:min-w-0 sm:max-w-md sm:flex-1"
+          >
+            <input
+              type="search"
+              name="q"
+              aria-label="Search tutors by name or subject"
+              placeholder="Find a tutor"
+              maxLength={200}
+              className="min-w-0 flex-1 bg-transparent text-sm text-[#17233d] outline-none placeholder:text-[#68758c]"
+            />
+
+            <button
+              type="submit"
+              aria-label="Search tutors"
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-[#26469b] transition hover:bg-[#e5e9f0]"
+            >
+              <Icon name="search" className="h-5 w-5" />
+            </button>
+          </form>
+
+          <div className="flex shrink-0 items-center gap-2 sm:gap-4">
+            {/* Notifications will be enabled in a future update. */}
+            <button
+              type="button"
+              disabled
+              title="Notifications coming soon"
+              aria-label="Notifications coming soon"
+              className="grid h-8 w-8 cursor-not-allowed place-items-center text-[#68758c] sm:h-10 sm:w-10"
+            >
+              <Icon name="bell" className="h-5 w-5" />
+            </button>
+
+            {/* Messaging will be implemented in Step 199. */}
+            <button
+              type="button"
+              disabled
+              title="Messages coming soon"
+              aria-label="Messages coming soon"
+              className="grid h-8 w-8 cursor-not-allowed place-items-center text-[#68758c] sm:h-10 sm:w-10"
+            >
+              <Icon name="message" className="h-5 w-5" />
+            </button>
+
+            <Link
+              href={user ? "/profile" : "/login"}
+              aria-label={user ? "My profile" : "Log in"}
+              className="hidden h-10 w-10 place-items-center rounded-full bg-[#f0f3f9] text-[#173472] lg:grid"
+            >
+              <Icon name="user" className="h-5 w-5" />
+            </Link>
+
+            {/* Preserve account and dashboard access. */}
+            <button
+              type="button"
+              aria-label="Toggle account menu"
+              aria-expanded={open}
+              aria-controls="feed-account-menu"
+              onClick={() => setOpen((previous) => !previous)}
+              className="grid h-8 w-8 place-items-center rounded-xl text-[#173472] sm:h-10 sm:w-10"
+            >
+              <Icon
+                name={open ? "close" : "menu"}
+                className="h-5 w-5"
+              />
+            </button>
+          </div>
+        </div>
+
+        {open && (
+          <nav
+            id="feed-account-menu"
+            aria-label="Feed account navigation"
+            className="absolute right-3 top-full mt-2 flex w-64 flex-col gap-2 rounded-2xl border border-[#e3e7ef] bg-white p-4 shadow-lg sm:right-6"
+          >
+            {user ? (
+              <>
+                <Link
+                  href={dashboard}
+                  onClick={() => setOpen(false)}
+                  className="btn-secondary"
+                >
+                  Dashboard
+                </Link>
+
+                <Link
+                  href="/profile"
+                  onClick={() => setOpen(false)}
+                  className="btn-secondary"
+                >
+                  My profile
+                </Link>
+
+                <button
+                  type="button"
+                  onClick={logout}
+                  className="btn-primary"
+                >
+                  Log out
+                </button>
+              </>
+            ) : (
+              <>
+                <Link
+                  href="/login"
+                  onClick={() => setOpen(false)}
+                  className="btn-secondary"
+                >
+                  Log in
+                </Link>
+
+                <Link
+                  href="/register"
+                  onClick={() => setOpen(false)}
+                  className="btn-primary"
+                >
+                  Get started
+                </Link>
+              </>
+            )}
+
+            <Link
+              href="/tutors"
+              onClick={() => setOpen(false)}
+              className="nav-link px-3 py-2"
+            >
+              Find a tutor
+            </Link>
+
+            <Link
+              href="/group-classes"
+              onClick={() => setOpen(false)}
+              className="nav-link px-3 py-2"
+            >
+              Group classes
+            </Link>
+
+            <Link
+              href="/courses"
+              onClick={() => setOpen(false)}
+              className="nav-link px-3 py-2"
+            >
+              Courses
+            </Link>
+          </nav>
+        )}
+      </header>
+    );
   }
 
   // Display the main website header.
