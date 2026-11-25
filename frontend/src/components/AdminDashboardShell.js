@@ -2,10 +2,6 @@ import Link from "next/link";
 
 // Keep administrator navigation separate from student and tutor dashboards.
 const modules = [
-  "Students",
-  "Tutors",
-  "Bookings",
-  "Group classes",
   "Audit logs",
   "Settings",
 ];
@@ -64,6 +60,52 @@ export function AdminDashboardShell({ name, children, activePage = "overview" })
                 }
               >
                 All users
+              </Link>
+
+
+              <Link
+                href="/dashboard/admin/students"
+                aria-current={activePage === "students" ? "page" : undefined}
+                className={
+                  "block rounded-xl px-4 py-3 font-bold text-white " +
+                  (activePage === "students" ? "bg-[#26469b]" : "")
+                }
+              >
+                Students
+              </Link>
+
+              <Link
+                href="/dashboard/admin/tutors"
+                aria-current={activePage === "tutors" ? "page" : undefined}
+                className={
+                  "block rounded-xl px-4 py-3 font-bold text-white " +
+                  (activePage === "tutors" ? "bg-[#26469b]" : "")
+                }
+              >
+                Tutors
+              </Link>
+
+
+              <Link
+                href="/dashboard/admin/bookings"
+                aria-current={activePage === "bookings" ? "page" : undefined}
+                className={
+                  "block rounded-xl px-4 py-3 font-bold text-white " +
+                  (activePage === "bookings" ? "bg-[#26469b]" : "")
+                }
+              >
+                Bookings
+              </Link>
+
+              <Link
+                href="/dashboard/admin/group-classes"
+                aria-current={activePage === "group-classes" ? "page" : undefined}
+                className={
+                  "block rounded-xl px-4 py-3 font-bold text-white " +
+                  (activePage === "group-classes" ? "bg-[#26469b]" : "")
+                }
+              >
+                Group classes
               </Link>
 
               <div className="grid grid-cols-2 gap-1 lg:grid-cols-1">

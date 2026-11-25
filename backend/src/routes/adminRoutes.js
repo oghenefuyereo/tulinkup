@@ -59,4 +59,13 @@ router.patch(
   changeAccountStatus
 );
 
+const {
+  getAdminBookings,
+  getAdminGroupClasses,
+} = require("../controllers/adminMonitoringController");
+
+// Allow administrators to monitor tutoring activity.
+router.get("/bookings", getAdminBookings);
+router.get("/group-classes", getAdminGroupClasses);
+
 module.exports = router;

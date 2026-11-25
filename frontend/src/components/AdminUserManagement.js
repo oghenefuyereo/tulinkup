@@ -40,6 +40,35 @@ function validId(value) {
     BigInt(value) <= 9223372036854775807n;
 }
 
+function validCount(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+function validNullableNumber(value, maximum) {
+  return value === null ||
+    (typeof value === "number" &&
+      Number.isFinite(value) &&
+      value >= 0 &&
+      value <= maximum);
+}
+
+// Validate tutor statistics before displaying administrative records.
+function validTutorStatistics(user) {
+  return typeof user.hasProfile === "boolean" &&
+    (user.hasProfile
+      ? validId(user.profileId) &&
+        ["pending", "approved", "rejected"].includes(user.approvalStatus)
+      : user.profileId === null &&
+        user.approvalStatus === null) &&
+    (user.availabilityStatus === null ||
+      typeof user.availabilityStatus === "string") &&
+    validNullableNumber(user.hourlyRate, 25) &&
+    validNullableNumber(user.rating, 5) &&
+    (user.reviewCount === null || validCount(user.reviewCount)) &&
+    validCount(user.totalBookings) &&
+    validCount(user.totalGroupClasses);
+}
+
 // Protect administrator accounts and prevent removed accounts from being restored.
 function availableActions(user) {
   if (
@@ -58,12 +87,29 @@ function availableActions(user) {
   return [];
 }
 
-export default function AdminUserManagement() {
+// Share account management across the administrator listing pages.
+export default function AdminUserManagement({ mode = "users" }) {
+  const isStudentPage = mode === "students";
+  const isTutorPage = mode === "tutors";
+  const isSpecializedPage = isStudentPage || isTutorPage;
+
+  const title = isStudentPage
+    ? "Student Management"
+    : isTutorPage
+      ? "Tutor Management"
+      : "User Management";
+
+  const description = isStudentPage
+    ? "Manage student accounts and review their learning activity."
+    : isTutorPage
+      ? "Manage tutor accounts, profiles and teaching activity."
+      : "View accounts and manage student and tutor access.";
   const [users, setUsers] = useState([]);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [role, setRole] = useState("");
   const [status, setStatus] = useState("");
+  const [approvalStatus, setApprovalStatus] = useState("");
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
@@ -96,12 +142,16 @@ export default function AdminUserManagement() {
     });
 
     if (search) query.set("search", search);
-    if (role) query.set("role", role);
+    if (mode === "users" && role) query.set("role", role);
+
+    if (mode === "tutors" && approvalStatus) {
+      query.set("approvalStatus", approvalStatus);
+    }
     if (status) query.set("status", status);
 
     try {
       const response = await fetch(
-        "/api/admin/users?" + query.toString(),
+        "/api/admin/" + mode + "?" + query.toString(),
         {
           cache: "no-store",
           signal: AbortSignal.any([
@@ -120,23 +170,40 @@ export default function AdminUserManagement() {
       }
 
       const pagination = data.pagination;
+      const records = data[mode];
 
       if (
-        !Array.isArray(data.users) ||
+        !Array.isArray(records) ||
         !pagination ||
         pagination.page !== page ||
         pagination.limit !== 20 ||
         !Number.isSafeInteger(pagination.total) ||
         pagination.total < 0 ||
         pagination.totalPages !== Math.ceil(pagination.total / 20) ||
-        data.users.length > 20 ||
-        !data.users.every(user =>
+        records.length > 20 ||
+        new Set(records.map(user => user?.id)).size !== records.length ||
+        !records.every(user =>
           user &&
           validId(user.id) &&
           typeof user.fullName === "string" &&
           typeof user.email === "string" &&
           ["student", "tutor", "admin"].includes(user.role) &&
-          ["active", "suspended", "removed"].includes(user.accountStatus)
+          ["active", "suspended", "removed"].includes(user.accountStatus) &&
+          (!status || user.accountStatus === status) &&
+          (mode !== "users" || !role || user.role === role) &&
+          (mode !== "students" || (
+            user.role === "student" &&
+            validCount(user.totalBookings) &&
+            validCount(user.totalGroupEnrollments)
+          )) &&
+          (mode !== "tutors" || (
+            user.role === "tutor" &&
+            validTutorStatistics(user) &&
+            (!approvalStatus ||
+              (approvalStatus === "no_profile"
+                ? !user.hasProfile
+                : user.approvalStatus === approvalStatus))
+          ))
         )
       ) {
         throw new Error("Invalid user response.");
@@ -147,7 +214,7 @@ export default function AdminUserManagement() {
         return;
       }
 
-      setUsers(data.users);
+      setUsers(records);
       setTotal(pagination.total);
       setTotalPages(pagination.totalPages);
 
@@ -160,7 +227,7 @@ export default function AdminUserManagement() {
         setLoading(false);
       }
     }
-  }, [page, search, role, status]);
+  }, [page, search, role, status, mode, approvalStatus]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -264,11 +331,11 @@ export default function AdminUserManagement() {
       <p className="eyebrow">TuLinkUp Administration</p>
 
       <h1 className="mt-2 text-3xl font-extrabold text-[#173472]">
-        User Management
+        {title}
       </h1>
 
       <p className="mt-3 text-[#71809a]">
-        View accounts and manage student and tutor access.
+        {description}
       </p>
 
       <div className="panel mt-6 p-5">
@@ -309,6 +376,7 @@ export default function AdminUserManagement() {
             </div>
           </div>
 
+          {!isSpecializedPage && (
           <div>
             <label htmlFor="user-role" className="mb-2 block text-sm font-bold">
               Role
@@ -332,6 +400,37 @@ export default function AdminUserManagement() {
               <option value="admin">Administrators</option>
             </select>
           </div>
+          )}
+
+          {isTutorPage && (
+            <div>
+              <label
+                htmlFor="tutor-approval-filter"
+                className="mb-2 block text-sm font-bold"
+              >
+                Approval status
+              </label>
+
+              <select
+                id="tutor-approval-filter"
+                className={inputClass}
+                value={approvalStatus}
+                disabled={busy}
+                onChange={event => {
+                  if (event.target.value === approvalStatus) return;
+                  resetList();
+                  setPage(1);
+                  setApprovalStatus(event.target.value);
+                }}
+              >
+                <option value="">All approval statuses</option>
+                <option value="pending">Pending</option>
+                <option value="approved">Approved</option>
+                <option value="rejected">Rejected</option>
+                <option value="no_profile">No profile</option>
+              </select>
+            </div>
+          )}
 
           <div>
             <label htmlFor="user-status" className="mb-2 block text-sm font-bold">
@@ -360,7 +459,7 @@ export default function AdminUserManagement() {
 
         <div className="mt-5 flex items-center justify-between gap-3">
           <p className="text-sm text-slate-600">
-            {loading ? "Loading..." : error ? "Unavailable" : total + " matching users"}
+            {loading ? "Loading..." : error ? "Unavailable" : total + " matching " + mode}
           </p>
 
           <button
@@ -399,8 +498,28 @@ export default function AdminUserManagement() {
               <thead className="bg-slate-50">
                 <tr>
                   <th scope="col" className="p-4">User</th>
-                  <th scope="col" className="p-4">Role</th>
+                  {!isSpecializedPage && (
+                    <th scope="col" className="p-4">Role</th>
+                  )}
                   <th scope="col" className="p-4">Status</th>
+                  {isSpecializedPage && (
+                    <>
+                      <th scope="col" className="p-4">Bookings</th>
+                      <th scope="col" className="p-4">
+                        {isStudentPage ? "Group enrollments" : "Group classes"}
+                      </th>
+                    </>
+                  )}
+
+                  {isTutorPage && (
+                    <>
+                      <th scope="col" className="p-4">Approval</th>
+                      <th scope="col" className="p-4">Availability</th>
+                      <th scope="col" className="p-4">Hourly rate</th>
+                      <th scope="col" className="p-4">Rating</th>
+                    </>
+                  )}
+
                   <th scope="col" className="p-4">Actions</th>
                 </tr>
               </thead>
@@ -413,7 +532,9 @@ export default function AdminUserManagement() {
                       <p className="break-all text-xs text-slate-500">{user.email}</p>
                     </td>
 
-                    <td className="p-4 capitalize">{user.role}</td>
+                    {!isSpecializedPage && (
+                      <td className="p-4 capitalize">{user.role}</td>
+                    )}
 
                     <td className="p-4 capitalize">
                       <span className={
@@ -427,6 +548,47 @@ export default function AdminUserManagement() {
                         {user.accountStatus}
                       </span>
                     </td>
+
+                    {isSpecializedPage && (
+                      <>
+                        <td className="p-4">{user.totalBookings}</td>
+                        <td className="p-4">
+                          {isStudentPage
+                            ? user.totalGroupEnrollments
+                            : user.totalGroupClasses}
+                        </td>
+                      </>
+                    )}
+
+                    {isTutorPage && (
+                      <>
+                        <td className="p-4 capitalize">
+                          {user.approvalStatus || "No profile"}
+                        </td>
+
+                        <td className="p-4 capitalize">
+                          {user.availabilityStatus || "Not available"}
+                        </td>
+
+                        <td className="p-4 whitespace-nowrap">
+                          {user.hourlyRate === null
+                            ? "Not set"
+                            : "CA$" + user.hourlyRate.toFixed(2)}
+                        </td>
+
+                        <td className="p-4 whitespace-nowrap">
+                          {user.rating === null
+                            ? "Not rated"
+                            : user.rating.toFixed(1) + " / 5"}
+
+                          {user.reviewCount !== null && (
+                            <p className="text-xs text-slate-500">
+                              {user.reviewCount} reviews
+                            </p>
+                          )}
+                        </td>
+                      </>
+                    )}
 
                     <td className="p-4">
                       <div className="flex flex-wrap gap-2">
