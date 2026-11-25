@@ -216,10 +216,55 @@ discriminatory, or unauthorized purposes.
 Account status changes and tutor approval decisions
 are recorded in the administrative audit system.
 
-The backend provides protected audit retrieval.
+To review administrative activity:
 
-A dedicated administrator audit log interface
-is not currently available.
+1. Open Audit logs from the administrator navigation.
+2. Review the recorded actions and affected accounts or profiles.
+3. Use administrator ID, action, target type, target ID,
+   or UTC date filters to narrow the results.
+4. Select Apply filters.
+5. Use the pagination controls to review additional records.
+6. Select Clear filters to remove the applied filters.
+7. Use Refresh to retrieve current audit records.
+
+Audit records include the administrator identifier, action,
+target, changed values, reason, and timestamp. Additional
+request details may also be available.
+
+Audit records are read-only. Administrators cannot edit
+or delete them through the dashboard.
+
+## Platform Settings
+
+Open Settings from the administrator navigation to review
+the current platform configuration.
+
+The page displays:
+
+- Private tutoring prices and session capacity.
+- Group tutoring prices, capacity, and revenue limits.
+- TuLinkUp commission and tutor revenue shares.
+- Free tutoring, paid tutoring, and tutor transfer availability.
+- Group class capacity rules.
+
+The tested configuration uses Canadian dollars, a maximum
+private hourly rate of CAD 25, a maximum group price of
+CAD 10 per student, and a maximum gross class revenue
+of CAD 100.
+
+TuLinkUp receives 20% and tutors receive 80% before
+applicable processing fees and taxes.
+
+Free tutoring is enabled in the tested configuration.
+Paid tutoring and tutor transfers remain disabled.
+
+Use Refresh to retrieve current settings.
+
+This page is read-only. Administrators cannot change prices,
+commission percentages, or payment availability through it.
+
+Contact the technical team through an approved channel
+when configuration changes are required.
 
 ## Handling Errors
 
@@ -254,8 +299,8 @@ Administrators should:
 
 The current administrator interface does not provide:
 
-- A dedicated audit log viewer
-- A platform settings interface
+- Editing or deleting administrative audit records
+- Editing platform settings or activating payment services
 - Administrator booking cancellation
 - Administrator payment refunds
 - Administrator classroom termination

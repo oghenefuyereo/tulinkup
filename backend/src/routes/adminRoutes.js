@@ -68,4 +68,11 @@ const {
 router.get("/bookings", getAdminBookings);
 router.get("/group-classes", getAdminGroupClasses);
 
+const {
+  getAdminPlatformSettings,
+} = require("../controllers/adminPlatformSettingsController");
+
+// Allow administrators to review the current platform configuration.
+router.get("/settings", getAdminPlatformSettings);
+
 module.exports = router;

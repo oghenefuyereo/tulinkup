@@ -103,6 +103,9 @@ arbitrary origins or wildcard origin configurations.
 - [ ] Verify tutor approval management.
 - [ ] Verify booking monitoring.
 - [ ] Verify group class monitoring.
+- [ ] Verify all nine administrator navigation links.
+- [ ] Verify the audit history interface.
+- [ ] Verify the read-only platform settings interface.
 - [ ] Verify search and filtering.
 - [ ] Verify pagination.
 - [ ] Verify loading and error states.
@@ -152,6 +155,10 @@ verification and safeguarding procedures.
 - [ ] Verify protected audit retrieval.
 - [ ] Verify audit filtering and pagination.
 - [ ] Verify unauthorized audit access is denied.
+- [ ] Verify invalid audit filters are rejected.
+- [ ] Verify audit records cannot be edited or deleted.
+- [ ] Verify confidential audit fields are not exposed.
+- [ ] Verify audit timestamps and UTC date filtering.
 - [ ] Verify failed transactions are rolled back.
 - [ ] Verify uncertain connections are discarded.
 - [ ] Verify uncertain commit outcomes are handled.
@@ -161,6 +168,26 @@ verification and safeguarding procedures.
 
 Audit records support administrative accountability
 but are not an independently tamper-proof system.
+
+## Platform Settings Verification
+
+- [ ] Verify the protected settings endpoint.
+- [ ] Verify administrator-only access.
+- [ ] Verify exact database-to-browser configuration values.
+- [ ] Verify settings response field filtering.
+- [ ] Verify no-store response caching.
+- [ ] Verify unsupported mutation methods are rejected.
+- [ ] Verify settings remain read-only in the browser.
+- [ ] Verify accessible configuration sections.
+- [ ] Verify refresh and error recovery.
+- [ ] Verify CAD pricing and group capacity rules.
+- [ ] Verify the 20% platform and 80% tutor revenue split.
+- [ ] Confirm free tutoring availability.
+- [ ] Confirm paid tutoring remains disabled.
+- [ ] Confirm tutor transfers remain disabled.
+
+Local settings integration completed with 31 successful
+assertions. Production verification is still required.
 
 ## Payment Safety
 
@@ -211,6 +238,11 @@ valid until expiration.
 - [ ] Verify frontend connectivity.
 - [ ] Verify administrator authentication.
 - [ ] Verify read-only administrator functionality.
+- [ ] Verify production audit history retrieval.
+- [ ] Verify production settings retrieval.
+- [ ] Verify reproducible database schema migrations.
+- [ ] Verify database network failure recovery.
+- [ ] Verify production performance and operational monitoring.
 - [ ] Verify student and tutor functionality.
 - [ ] Review application logs.
 - [ ] Verify no confidential information is exposed.
@@ -233,8 +265,8 @@ without evaluating potential data loss.
 The following functionality is outside the current
 administrator interface scope:
 
-- Dedicated administrator audit log viewer
-- Platform settings management interface
+- Administrator audit record editing or deletion
+- Platform settings modification and payment activation
 - Administrator booking cancellation
 - Administrator payment refunds
 - Administrator classroom termination

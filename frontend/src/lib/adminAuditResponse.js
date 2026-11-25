@@ -287,6 +287,7 @@ function validateRecord(record, query) {
     !validId(record.id) ||
     !validId(record.adminId) ||
     !validId(record.targetId) ||
+    typeof record.action !== "string" ||
     !Object.hasOwn(AUDIT_ACTIONS, record.action) ||
     AUDIT_ACTIONS[record.action] !== record.targetType ||
     (

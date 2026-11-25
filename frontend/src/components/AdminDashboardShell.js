@@ -1,10 +1,6 @@
 import Link from "next/link";
 
 // Keep administrator navigation separate from student and tutor dashboards.
-const modules = [
-  "Settings",
-];
-
 export function AdminDashboardShell({ name, children, activePage = "overview" }) {
   return (
     <div className="min-h-screen bg-[#f7f9fd]">
@@ -49,7 +45,6 @@ export function AdminDashboardShell({ name, children, activePage = "overview" })
     Tutor approvals
   </Link>
 
-  {/* Enable the remaining modules when their pages are ready. */}
               <Link
                 href="/dashboard/admin/users"
                 aria-current={activePage === "users" ? "page" : undefined}
@@ -120,20 +115,18 @@ export function AdminDashboardShell({ name, children, activePage = "overview" })
                 Audit logs
               </Link>
 
-              <div className="grid grid-cols-2 gap-1 lg:grid-cols-1">
-                {modules.map((label) => (
-                  <div
-                    key={label}
-                    aria-disabled="true"
-                    className="rounded-xl px-4 py-3 text-sm text-white/70"
-                  >
-                    <span>{label}</span>
-                    <span className="mt-1 block text-xs text-white/60">
-                      Coming soon
-                    </span>
-                  </div>
-                ))}
-              </div>
+              <Link
+                href="/dashboard/admin/settings"
+                aria-current={
+                  activePage === "settings" ? "page" : undefined
+                }
+                className={
+                  "block rounded-xl px-4 py-3 font-bold text-white " +
+                  (activePage === "settings" ? "bg-[#26469b]" : "")
+                }
+              >
+                Settings
+              </Link>
             </nav>
 
           </div>

@@ -50,6 +50,8 @@ and database operations.
 - One-on-one booking monitoring
 - Group class monitoring
 - Administrative audit record retrieval
+- Read-only audit history with filtering and pagination
+- Read-only platform settings and service availability
 
 Account removal preserves historical records instead of
 physically deleting the account.
@@ -69,6 +71,7 @@ authentication and administrator authorization.
 | GET | /bookings | Monitor one-on-one bookings |
 | GET | /group-classes | Monitor group classes |
 | GET | /audit-logs | Retrieve administrative audit records |
+| GET | /settings | Retrieve validated platform configuration |
 | PATCH | /users/:userId/status | Change account status |
 | PATCH | /tutors/:profileId/approval | Change tutor approval status |
 
@@ -83,6 +86,8 @@ authentication and administrator authorization.
 | Tutor approvals | /dashboard/admin/tutor-approvals |
 | Bookings | /dashboard/admin/bookings |
 | Group classes | /dashboard/admin/group-classes |
+| Audit logs | /dashboard/admin/audit-logs |
+| Settings | /dashboard/admin/settings |
 
 ## Authentication and Authorization
 
@@ -198,6 +203,63 @@ Recorded information includes:
 Audit records support accountability and investigation.
 They are not a fully tamper-proof external audit system.
 
+The dedicated audit history interface supports filtering by
+administrator identifier, action, target type, target identifier,
+and UTC date range.
+
+Audit records are paginated. The backend and frontend validate
+filters and response structures. Invalid filter combinations
+are rejected, and confidential response fields are excluded.
+
+The interface does not provide audit record editing or deletion.
+
+## Platform Settings
+
+The administrator settings interface retrieves configuration
+from the platform_settings database table through the existing
+platform settings service.
+
+The backend exposes an authenticated GET /api/admin/settings
+endpoint. The Next.js API proxy validates and filters the
+response before returning it to the browser.
+
+The tested configuration is:
+
+| Setting | Value |
+| --- | --- |
+| Currency | CAD |
+| Private hourly rate | CAD 0-25 |
+| Private session capacity | 1 student |
+| Group price per student | CAD 0-10 |
+| Minimum configured group capacity | 2 students |
+| Maximum group capacity | 20 students |
+| Maximum gross group revenue | CAD 100 |
+| Platform commission | 20% |
+| Tutor revenue | 80% |
+| Free tutoring | Enabled |
+| Paid tutoring | Disabled |
+| Tutor transfers | Disabled |
+
+Private tutoring prices are prorated according to session duration.
+
+For a positive group price, the maximum capacity is the smaller
+of the configured maximum student count and the gross revenue
+limit divided by the student price, rounded down.
+
+Free classes can accommodate up to 20 students under the tested
+configuration. At CAD 10 per student, the maximum capacity is
+10 students.
+
+Revenue shares are calculated before applicable processing
+fees and taxes.
+
+The settings interface is read-only. It does not expose
+configuration mutation endpoints or payment activation controls.
+
+Settings responses use no-store caching restrictions and
+explicit field validation. Database credentials, payment secrets,
+and internal configuration metadata are not returned.
+
 ## Frontend Security
 
 Administrator frontend protections include:
@@ -248,6 +310,15 @@ Recent verified results:
 | Monitoring browser regression, 191C.5 | 19 | 0 |
 | Transaction fault simulation, 191D.3 | 28 | 0 |
 | Final database integration, 191D.4 | 60 | 0 |
+| Audit contract validation, 194C | 107 | 0 |
+| Audit response regression, 194E.1 | 60 | 0 |
+| Audit database integration, 194E.2 | 54 | 0 |
+| Audit browser checks, 194E.3B and 195E.4B | 21 | 0 after retest |
+| Settings response validation, 195C.2 | 78 | 0 |
+| Settings backend integration, 195E.1 | 38 | 0 |
+| Settings proxy integration, 195E.2 | 29 | 0 |
+| Settings browser integration, 195E.3 | 24 | 0 |
+| Final settings integration, 195E.5C | 31 | 0 |
 
 The monitoring accessibility issue identified during earlier
 browser testing was corrected and successfully retested.
@@ -263,11 +334,39 @@ databases containing synthetic accounts.
 Temporary test databases were removed after successful
 verification, and the permanent test database was preserved.
 
+The final settings integration used the actual Express backend,
+compiled Next.js frontend, Chromium browser, and an isolated
+PostgreSQL database with a restricted database role.
+
+All 31 final assertions passed, including authorization, exact
+configuration values, read-only behavior, accessibility,
+refresh behavior, and database integrity checks.
+
+Earlier browser failures caused by accessibility and selector
+issues were corrected and successfully retested.
+
+The settings integrity checks compared configuration records
+and user, tutor profile, and audit record counts. They did not
+compare every column in every database table.
+
+The reusable settings integration script is maintained locally
+outside the application repository at:
+
+tulinkup-testing/scripts/admin-settings-integration.cjs
+
+The script requires the isolated PostgreSQL test environment
+and locally installed Playwright browser tools.
+
 ## Known Limitations
 
-- Administrator audit log retrieval is implemented in the
-  backend, but its dedicated frontend interface is deferred.
-- The administrator settings interface is deferred.
+- Audit history and platform settings are available as
+  read-only administrator interfaces.
+- Administrator configuration editing is deferred.
+- Existing unpaid sessions may require revalidation against
+  current pricing rules before payment preparation.
+- Audit records are not independently tamper-proof.
+- Concurrent account changes and previously issued access
+  tokens require additional security consideration.
 - Stripe payment integration requires additional verification.
 - Previously issued JWTs may become usable again after
   account reactivation if they have not expired.
