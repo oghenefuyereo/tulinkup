@@ -132,10 +132,15 @@ function validRecord(record, isBooking) {
 }
 
 function StatusFilter({ label, value, options, onChange, disabled }) {
+  const filterId = "monitoring-" + label.toLowerCase().replace(/\s+/g, "-");
+
   return (
-    <label className="block text-sm font-bold">
-      <span className="mb-2 block">{label}</span>
+    <div className="block text-sm font-bold">
+      <label htmlFor={filterId} className="mb-2 block">
+        {label}
+      </label>
       <select
+        id={filterId}
         className={inputClass}
         value={value}
         disabled={disabled}
@@ -151,7 +156,7 @@ function StatusFilter({ label, value, options, onChange, disabled }) {
           </option>
         ))}
       </select>
-    </label>
+    </div>
   );
 }
 
