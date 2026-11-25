@@ -138,6 +138,11 @@ app.use((req, res) => {
 app.use((error, req, res, next) => {
   console.error("API error:", error);
 
+  // Delegate errors when a response has already started.
+  if (res.headersSent) {
+    return next(error);
+  }
+
   if (error.code === "LIMIT_FILE_SIZE") {
     return res.status(413).json({
       success: false,

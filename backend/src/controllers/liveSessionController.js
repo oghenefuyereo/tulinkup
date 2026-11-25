@@ -10,7 +10,7 @@ const {
   commitBookingTransaction,
   rollbackBookingTransaction,
   abortBookingTransaction,
-  releaseBookingConnection,
+  releaseBookingTransaction,
 } = require("../services/bookingTransactionService");
 
 // Import the database connection.
@@ -877,7 +877,7 @@ async function handleSession(req, res, action) {
     );
   } finally {
     if (client) {
-      releaseBookingConnection(client);
+      releaseBookingTransaction(client);
     }
   }
 }
