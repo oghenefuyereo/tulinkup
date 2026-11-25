@@ -3,6 +3,10 @@
 // Import the PostgreSQL connection pool.
 const pool = require("../config/db");
 
+const {
+  parseDatabaseCount,
+} = require("../services/adminStatisticsValidation");
+
 // Retrieve administrator dashboard statistics.
 async function getAdminDashboard(req, res) {
 
@@ -106,13 +110,7 @@ async function getAdminDashboard(req, res) {
 
     // Convert PostgreSQL COUNT values to safe integers.
     function count(value) {
-      const number = Number(value);
-
-      if (!Number.isSafeInteger(number) || number < 0) {
-        throw new Error("Invalid dashboard statistic.");
-      }
-
-      return number;
+      return parseDatabaseCount(value);
     }
 
     // Organize statistics into dashboard categories.
@@ -334,16 +332,44 @@ async function getAdminUsers(req, res) {
   let client;
   let transactionStarted = false;
   let discardClient = false;
+  let connectionFailed = false;
+
+  // Discard connections that fail during a database transaction.
+  function handleConnectionError() {
+    connectionFailed = true;
+    discardClient = true;
+  }
 
   try {
 
     client = await pool.connect();
 
-    await client.query(
+    client.on("error", handleConnectionError);
+
+    // Discard the connection if transaction startup fails.
+    discardClient = true;
+
+    const beginResult = await client.query(
       "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY"
     );
 
+    if (
+      connectionFailed ||
+      beginResult?.command !== "BEGIN"
+    ) {
+      throw new Error("Unable to start read-only transaction.");
+    }
+
+    discardClient = false;
+
     transactionStarted = true;
+
+    // Limit how long database statements and locks can wait.
+    await client.query("SET LOCAL lock_timeout = '5s'");
+    await client.query("SET LOCAL statement_timeout = '15s'");
+    await client.query(
+      "SET LOCAL idle_in_transaction_session_timeout = '30s'"
+    );
 
     // Count only users matching the requested filters.
     const countResult = await client.query(
@@ -352,7 +378,7 @@ async function getAdminUsers(req, res) {
       values
     );
 
-    const total = Number(countResult.rows[0].total);
+    const total = parseDatabaseCount(countResult.rows[0].total);
 
     if (!Number.isSafeInteger(total) || total < 0) {
 
@@ -385,7 +411,28 @@ async function getAdminUsers(req, res) {
 
     const totalPages = Math.ceil(total / limit);
 
-    await client.query("COMMIT");
+    if (discardClient) {
+      throw new Error("Database connection unavailable.");
+    }
+
+    // Verify that PostgreSQL completed the transaction.
+    let commitResult;
+
+    // Discard the connection if commit cannot be verified.
+    try {
+      commitResult = await client.query("COMMIT");
+    } catch (error) {
+      discardClient = true;
+      throw error;
+    }
+
+    if (
+      discardClient ||
+      commitResult?.command !== "COMMIT"
+    ) {
+      discardClient = true;
+      throw new Error("Read-only transaction was not committed.");
+    }
 
     transactionStarted = false;
 
@@ -408,7 +455,20 @@ async function getAdminUsers(req, res) {
 
       try {
 
-        await client.query("ROLLBACK");
+        if (discardClient) {
+          throw new Error("Database connection unavailable.");
+        }
+
+        const rollbackResult = await client.query("ROLLBACK");
+
+        if (
+          discardClient ||
+          rollbackResult?.command !== "ROLLBACK"
+        ) {
+          throw new Error("Database rollback failed.");
+        }
+
+        transactionStarted = false;
 
       } catch (rollbackError) {
 
@@ -436,6 +496,11 @@ async function getAdminUsers(req, res) {
     if (client) {
 
       client.release(discardClient);
+
+      // Keep failed connections protected during shutdown.
+      if (!discardClient) {
+        client.removeListener("error", handleConnectionError);
+      }
 
     }
 
@@ -690,35 +755,48 @@ async function getAdminStudents(req, res) {
   let client;
   let transactionStarted = false;
   let discardClient = false;
+  let connectionFailed = false;
+
+  // Discard connections that fail during a database transaction.
+  function handleConnectionError() {
+    connectionFailed = true;
+    discardClient = true;
+  }
 
   function parseCount(value) {
-
-    const number = Number(value);
-
-    if (
-      value === null ||
-      value === undefined ||
-      !Number.isSafeInteger(number) ||
-      number < 0
-    ) {
-
-      throw new Error("Invalid student statistic.");
-
-    }
-
-    return number;
-
+    return parseDatabaseCount(value);
   }
 
   try {
 
     client = await pool.connect();
 
-    await client.query(
+    client.on("error", handleConnectionError);
+
+    // Discard the connection if transaction startup fails.
+    discardClient = true;
+
+    const beginResult = await client.query(
       "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY"
     );
 
+    if (
+      connectionFailed ||
+      beginResult?.command !== "BEGIN"
+    ) {
+      throw new Error("Unable to start read-only transaction.");
+    }
+
+    discardClient = false;
+
     transactionStarted = true;
+
+    // Limit how long database statements and locks can wait.
+    await client.query("SET LOCAL lock_timeout = '5s'");
+    await client.query("SET LOCAL statement_timeout = '15s'");
+    await client.query(
+      "SET LOCAL idle_in_transaction_session_timeout = '30s'"
+    );
 
     const countResult = await client.query(
       "SELECT COUNT(*) AS total " +
@@ -801,7 +879,28 @@ async function getAdminStudents(req, res) {
       total / limit
     );
 
-    await client.query("COMMIT");
+    if (discardClient) {
+      throw new Error("Database connection unavailable.");
+    }
+
+    // Verify that PostgreSQL completed the transaction.
+    let commitResult;
+
+    // Discard the connection if commit cannot be verified.
+    try {
+      commitResult = await client.query("COMMIT");
+    } catch (error) {
+      discardClient = true;
+      throw error;
+    }
+
+    if (
+      discardClient ||
+      commitResult?.command !== "COMMIT"
+    ) {
+      discardClient = true;
+      throw new Error("Read-only transaction was not committed.");
+    }
 
     transactionStarted = false;
 
@@ -836,7 +935,20 @@ async function getAdminStudents(req, res) {
 
       try {
 
-        await client.query("ROLLBACK");
+        if (discardClient) {
+          throw new Error("Database connection unavailable.");
+        }
+
+        const rollbackResult = await client.query("ROLLBACK");
+
+        if (
+          discardClient ||
+          rollbackResult?.command !== "ROLLBACK"
+        ) {
+          throw new Error("Database rollback failed.");
+        }
+
+        transactionStarted = false;
 
       } catch (rollbackError) {
 
@@ -867,6 +979,11 @@ async function getAdminStudents(req, res) {
     if (client) {
 
       client.release(discardClient);
+
+      // Keep failed connections protected during shutdown.
+      if (!discardClient) {
+        client.removeListener("error", handleConnectionError);
+      }
 
     }
 
@@ -1066,22 +1183,7 @@ async function getAdminTutors(req, res) {
     " WHERE " + conditions.join(" AND ");
 
   function parseCount(value) {
-
-    const number = Number(value);
-
-    if (
-      value === null ||
-      value === undefined ||
-      !Number.isSafeInteger(number) ||
-      number < 0
-    ) {
-
-      throw new Error("Invalid tutor statistic.");
-
-    }
-
-    return number;
-
+    return parseDatabaseCount(value);
   }
 
   function parseNullableNumber(
@@ -1127,16 +1229,44 @@ async function getAdminTutors(req, res) {
   let client;
   let transactionStarted = false;
   let discardClient = false;
+  let connectionFailed = false;
+
+  // Discard connections that fail during a database transaction.
+  function handleConnectionError() {
+    connectionFailed = true;
+    discardClient = true;
+  }
 
   try {
 
     client = await pool.connect();
 
-    await client.query(
+    client.on("error", handleConnectionError);
+
+    // Discard the connection if transaction startup fails.
+    discardClient = true;
+
+    const beginResult = await client.query(
       "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY"
     );
 
+    if (
+      connectionFailed ||
+      beginResult?.command !== "BEGIN"
+    ) {
+      throw new Error("Unable to start read-only transaction.");
+    }
+
+    discardClient = false;
+
     transactionStarted = true;
+
+    // Limit how long database statements and locks can wait.
+    await client.query("SET LOCAL lock_timeout = '5s'");
+    await client.query("SET LOCAL statement_timeout = '15s'");
+    await client.query(
+      "SET LOCAL idle_in_transaction_session_timeout = '30s'"
+    );
 
     const countResult = await client.query(
 
@@ -1271,7 +1401,28 @@ async function getAdminTutors(req, res) {
       total / limit
     );
 
-    await client.query("COMMIT");
+    if (discardClient) {
+      throw new Error("Database connection unavailable.");
+    }
+
+    // Verify that PostgreSQL completed the transaction.
+    let commitResult;
+
+    // Discard the connection if commit cannot be verified.
+    try {
+      commitResult = await client.query("COMMIT");
+    } catch (error) {
+      discardClient = true;
+      throw error;
+    }
+
+    if (
+      discardClient ||
+      commitResult?.command !== "COMMIT"
+    ) {
+      discardClient = true;
+      throw new Error("Read-only transaction was not committed.");
+    }
 
     transactionStarted = false;
 
@@ -1306,7 +1457,20 @@ async function getAdminTutors(req, res) {
 
       try {
 
-        await client.query("ROLLBACK");
+        if (discardClient) {
+          throw new Error("Database connection unavailable.");
+        }
+
+        const rollbackResult = await client.query("ROLLBACK");
+
+        if (
+          discardClient ||
+          rollbackResult?.command !== "ROLLBACK"
+        ) {
+          throw new Error("Database rollback failed.");
+        }
+
+        transactionStarted = false;
 
       } catch (rollbackError) {
 
@@ -1337,6 +1501,11 @@ async function getAdminTutors(req, res) {
     if (client) {
 
       client.release(discardClient);
+
+      // Keep failed connections protected during shutdown.
+      if (!discardClient) {
+        client.removeListener("error", handleConnectionError);
+      }
 
     }
 

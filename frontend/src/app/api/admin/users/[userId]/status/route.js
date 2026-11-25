@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { isTrustedAdminOrigin, validateAccountMutation } from "@/lib/adminMutationSecurity";
 
 export const dynamic = "force-dynamic";
 
@@ -50,10 +51,7 @@ export async function PATCH(request, { params }) {
     }
 
     // Accept account status changes only from the same application origin.
-    if (
-      request.headers.get("origin") !==
-      new URL(request.url).origin
-    ) {
+    if (!isTrustedAdminOrigin(request)) {
       return reply({ error: "Invalid request origin." }, 403);
     }
 
@@ -140,21 +138,20 @@ export async function PATCH(request, { params }) {
       );
     }
 
-    const data = await response.json();
+    try {
+      const data = await response.json();
 
-    if (
-      data.success !== true ||
-      String(data.account?.userId) !== userId ||
-      data.account?.accountStatus !== body.status ||
-      data.account?.previousStatus !== body.expectedStatus
-    ) {
       return reply(
-        { error: "Account status outcome requires verification. Refresh before retrying." },
+        validateAccountMutation(data, userId, body)
+      );
+    } catch {
+      return reply(
+        {
+          error: "The outcome requires verification. Refresh before retrying.",
+        },
         502
       );
     }
-
-    return reply(data);
   } catch {
     return reply(
       { error: "Unable to confirm the account status outcome. Refresh before retrying." },

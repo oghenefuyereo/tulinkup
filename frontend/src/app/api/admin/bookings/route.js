@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { validateAdminMonitoringResponse } from "@/lib/adminMonitoringResponse";
 
 export const dynamic = "force-dynamic";
 
@@ -16,23 +17,7 @@ const allowedFilters = [
   "paymentStatus"
 ];
 
-const recordFields = [
-  "id",
-  "studentId",
-  "tutorId",
-  "studentName",
-  "tutorName",
-  "subject",
-  "date",
-  "startTime",
-  "durationMinutes",
-  "status",
-  "totalPriceCents",
-  "currency",
-  "paymentStatus",
-  "sessionStatus",
-  "createdAt"
-];
+
 
 function reply(data, status = 200) {
   return NextResponse.json(data, {
@@ -43,23 +28,6 @@ function reply(data, status = 200) {
 
 function fail(error, status) {
   return reply({ success: false, error }, status);
-}
-
-// Return only the monitoring fields required by the dashboard.
-function selectFields(record, fields) {
-  if (!record || typeof record !== "object" || Array.isArray(record)) {
-    throw new Error("Invalid monitoring record.");
-  }
-
-  return Object.fromEntries(
-    fields.map(field => {
-      if (!Object.hasOwn(record, field)) {
-        throw new Error("Missing monitoring field.");
-      }
-
-      return [field, record[field]];
-    })
-  );
 }
 
 // Retrieve monitoring information through the protected backend.
@@ -104,35 +72,12 @@ export async function GET(request) {
       return fail("Unable to retrieve monitoring information.", status);
     }
 
-    const data = await response.json();
-
-    if (
-      data?.success !== true ||
-      !Array.isArray(data.bookings) ||
-      data.bookings.length > 100
-    ) {
-      return fail("Invalid monitoring response.", 502);
-    }
-
     try {
-      const records = data.bookings.map(record =>
-        selectFields(record, recordFields)
+      const data = await response.json();
+
+      return reply(
+        validateAdminMonitoringResponse(data, "bookings", query)
       );
-
-      const pagination = selectFields(data.pagination, [
-        "page",
-        "limit",
-        "total",
-        "totalPages",
-        "hasNextPage",
-        "hasPreviousPage",
-      ]);
-
-      return reply({
-        success: true,
-        bookings: records,
-        pagination,
-      });
     } catch {
       return fail("Invalid monitoring response.", 502);
     }

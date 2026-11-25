@@ -2,6 +2,10 @@
 
 const pool = require("../config/db");
 
+const {
+  parseDatabaseCount,
+} = require("../services/adminStatisticsValidation");
+
 const bookingStatuses = [
   "pending",
   "accepted",
@@ -317,7 +321,7 @@ async function listRecords(req, res, mode) {
     }
 
     const row = result.rows[0];
-    const total = Number(row.total);
+    const total = parseDatabaseCount(row.total);
 
     if (
       !Number.isSafeInteger(total) ||

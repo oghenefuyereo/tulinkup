@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { isTrustedAdminOrigin, validateApprovalMutation } from "@/lib/adminMutationSecurity";
 
 export const dynamic = "force-dynamic";
 
@@ -50,10 +51,7 @@ export async function PATCH(request, { params }) {
     }
 
     // Accept approval changes only from the same application origin.
-    if (
-      request.headers.get("origin") !==
-      new URL(request.url).origin
-    ) {
+    if (!isTrustedAdminOrigin(request)) {
       return reply({ error: "Invalid request origin." }, 403);
     }
 
@@ -136,21 +134,20 @@ export async function PATCH(request, { params }) {
       );
     }
 
-    const data = await response.json();
+    try {
+      const data = await response.json();
 
-    if (
-      data.success !== true ||
-      String(data.approval?.profileId) !== profileId ||
-      data.approval?.approvalStatus !== body.status ||
-      data.approval?.previousStatus !== body.expectedStatus
-    ) {
       return reply(
-        { error: "Approval outcome requires verification. Refresh before retrying." },
+        validateApprovalMutation(data, profileId, body)
+      );
+    } catch {
+      return reply(
+        {
+          error: "The outcome requires verification. Refresh before retrying.",
+        },
         502
       );
     }
-
-    return reply(data);
   } catch {
     return reply(
       { error: "Unable to confirm the approval outcome. Refresh before retrying." },

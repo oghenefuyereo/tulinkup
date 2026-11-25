@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { validateAdminListResponse } from "../../../../lib/adminListResponse";
 
 export const dynamic = "force-dynamic";
 
@@ -68,17 +69,24 @@ export async function GET(request) {
     if (!response.ok) {
       return reply(
         { error: "Unable to retrieve students." },
-        response.status
+        [400, 401, 403, 429].includes(response.status)
+          ? response.status
+          : 503
       );
     }
 
-    const data = await response.json();
+    try {
+      const data = await response.json();
 
-    if (data.success !== true || !Array.isArray(data.students)) {
-      return reply({ error: "Invalid student response." }, 502);
+      return reply(
+        validateAdminListResponse(data, "students", query)
+      );
+    } catch {
+      return reply(
+        { error: "Invalid administrator response." },
+        502
+      );
     }
-
-    return reply(data);
   } catch {
     return reply(
       { error: "Student management is temporarily unavailable." },

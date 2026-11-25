@@ -3,6 +3,10 @@
 const pool = require("../config/db");
 
 const {
+  parseDatabaseCount,
+} = require("../services/adminStatisticsValidation");
+
+const {
   ACTION_TARGETS,
   validateAuditId,
   validateAdminAudit,
@@ -233,6 +237,7 @@ async function getAdminAuditLogs(req, res) {
 
   if (!req.user || req.user.role !== "admin") {
     return res.status(403).json({
+      success: false,
       message: "Administrator access required.",
     });
   }
@@ -243,6 +248,7 @@ async function getAdminAuditLogs(req, res) {
     filters = parseAuditFilters(req.query);
   } catch (error) {
     return res.status(400).json({
+      success: false,
       message: error.statusCode === 400
         ? error.message
         : "Invalid audit filters.",
@@ -252,18 +258,48 @@ async function getAdminAuditLogs(req, res) {
   let client;
   let transactionStarted = false;
   let discard = false;
+  let connectionFailed = false;
+  let commitStarted = false;
+
+  // Keep track of database connection failures.
+  function handleConnectionError() {
+    connectionFailed = true;
+    discard = true;
+  }
 
   try {
     client = await pool.connect();
 
-    await client.query(
+    client.on("error", handleConnectionError);
+
+    // Discard the connection if transaction startup fails.
+    discard = true;
+
+    const begin = await client.query(
       "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY"
     );
 
+    if (
+      connectionFailed ||
+      begin?.command !== "BEGIN"
+    ) {
+      throw new Error("Audit transaction could not be started.");
+    }
+
     transactionStarted = true;
+    discard = false;
+
+    // Prevent database operations from waiting indefinitely.
+    await client.query(
+      "SET LOCAL lock_timeout = '5s'"
+    );
 
     await client.query(
-      "SET LOCAL statement_timeout = '10s'"
+      "SET LOCAL statement_timeout = '15s'"
+    );
+
+    await client.query(
+      "SET LOCAL idle_in_transaction_session_timeout = '30s'"
     );
 
     // Confirm the administrator is still active.
@@ -277,10 +313,20 @@ async function getAdminAuditLogs(req, res) {
     );
 
     if (administrator.rowCount !== 1) {
-      await client.query("ROLLBACK");
+      const rollback = await client.query("ROLLBACK");
+
+      if (
+        connectionFailed ||
+        rollback?.command !== "ROLLBACK"
+      ) {
+        discard = true;
+        throw new Error("Audit rollback failed.");
+      }
+
       transactionStarted = false;
 
       return res.status(403).json({
+        success: false,
         message: "Active administrator access required.",
       });
     }
@@ -294,11 +340,9 @@ async function getAdminAuditLogs(req, res) {
       values
     );
 
-    const total = Number(countResult.rows[0].total);
-
-    if (!Number.isSafeInteger(total) || total < 0) {
-      throw new Error("Invalid audit record count.");
-    }
+    const total = parseDatabaseCount(
+      countResult.rows[0].total
+    );
 
     const offset = (filters.page - 1) * filters.limit;
 
@@ -329,16 +373,37 @@ async function getAdminAuditLogs(req, res) {
 
     const auditLogs = result.rows.map(serializeAuditRecord);
 
+    // Verify that the records match the requested page.
+    const expectedRecords = Math.min(
+      filters.limit,
+      Math.max(0, total - offset)
+    );
+
+    if (auditLogs.length !== expectedRecords) {
+      throw new Error("Invalid audit pagination result.");
+    }
+
+    if (connectionFailed) {
+      throw new Error("Audit database connection failed.");
+    }
+
+    commitStarted = true;
+
     const commit = await client.query("COMMIT");
 
-    if (commit.command !== "COMMIT") {
+    if (
+      connectionFailed ||
+      commit?.command !== "COMMIT"
+    ) {
       discard = true;
       throw new Error("Audit read transaction failed.");
     }
 
     transactionStarted = false;
+    commitStarted = false;
 
     return res.status(200).json({
+      success: true,
       auditLogs,
       pagination: {
         page: filters.page,
@@ -350,29 +415,43 @@ async function getAdminAuditLogs(req, res) {
       },
     });
   } catch (error) {
-    if (client && transactionStarted) {
-      try {
-        const rollback = await client.query("ROLLBACK");
+    if (client) {
+      if (connectionFailed || commitStarted || discard) {
+        discard = true;
+      } else if (transactionStarted) {
+        try {
+          const rollback = await client.query("ROLLBACK");
 
-        if (rollback.command !== "ROLLBACK") {
+          if (
+            connectionFailed ||
+            rollback?.command !== "ROLLBACK"
+          ) {
+            discard = true;
+          }
+        } catch {
           discard = true;
         }
-      } catch {
-        discard = true;
       }
-    } else if (client) {
-      discard = true;
     }
 
     // Do not expose database errors or audit contents.
     console.error("Administrator audit retrieval failed.");
 
-    return res.status(500).json({
+    return res.status(503).json({
+      success: false,
       message: "Unable to retrieve administrator audit logs.",
     });
   } finally {
     if (client) {
       client.release(discard);
+
+      // Keep discarded connections protected during shutdown.
+      if (!discard) {
+        client.removeListener(
+          "error",
+          handleConnectionError
+        );
+      }
     }
   }
 }
