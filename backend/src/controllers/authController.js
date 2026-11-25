@@ -5,11 +5,32 @@ const bcrypt = require("bcryptjs");
 // Import the database connection to access user information.
 const pool = require("../config/db");
 
+const {
+  validateLegalAcceptance,
+  recordLegalAcceptance
+} = require("../services/legalAcceptanceService");
+
 // Register a new student or tutor account.
 const register = async (req, res) => {
+  let client;
+
   try {
     // Get the information submitted during registration.
-    const { full_name, email, password, role } = req.body;
+    const {
+      full_name,
+      email,
+      password,
+      role,
+      termsAccepted,
+      termsVersion,
+      privacyVersion
+    } = req.body;
+
+    validateLegalAcceptance({
+      termsAccepted,
+      termsVersion,
+      privacyVersion
+    });
 
     // Make sure the user has filled in all required fields.
     if (!full_name || !email || !password || !role) {
@@ -55,14 +76,28 @@ const register = async (req, res) => {
     // Hash the password before saving it to the database.
     const passwordHash = await bcrypt.hash(password, 12);
 
-    // Save the new user and return their account information.
-    const result = await pool.query(
+    // Save the account and legal acceptance atomically.
+    client = await pool.connect();
+
+    await client.query("BEGIN");
+
+    const result = await client.query(
       `INSERT INTO public.users
        (full_name, email, password_hash, role)
        VALUES ($1, $2, $3, $4)
        RETURNING id, full_name, email, role, created_at`,
       [full_name.trim(), normalizedEmail, passwordHash, role]
     );
+
+    await recordLegalAcceptance(client, {
+      userId: result.rows[0].id,
+      registrationMethod: "email",
+      termsAccepted,
+      termsVersion,
+      privacyVersion
+    });
+
+    await client.query("COMMIT");
 
     // Confirm that the account was created successfully.
     return res.status(201).json({
@@ -72,6 +107,17 @@ const register = async (req, res) => {
     });
 
   } catch (error) {
+    if (client) {
+      await client.query("ROLLBACK").catch(() => {});
+    }
+
+    if (error.status === 400) {
+      return res.status(400).json({
+        success: false,
+        message: error.message
+      });
+    }
+
     // Log any unexpected registration errors.
     console.error("Registration error:", error.message);
 
@@ -88,6 +134,10 @@ const register = async (req, res) => {
       success: false,
       message: "Registration failed"
     });
+  } finally {
+    if (client) {
+      client.release();
+    }
   }
 };
 

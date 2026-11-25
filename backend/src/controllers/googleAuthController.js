@@ -53,7 +53,9 @@ async function completeGoogleAuth(req, res) {
       codeVerifier,
       mode,
       role,
-      termsAccepted
+      termsAccepted,
+      termsVersion,
+      privacyVersion
     } = req.body || {};
 
     if (!["login", "register"].includes(mode)) {
@@ -106,7 +108,9 @@ async function completeGoogleAuth(req, res) {
       {
         mode,
         role,
-        termsAccepted
+        termsAccepted,
+        termsVersion,
+        privacyVersion
       }
     );
 

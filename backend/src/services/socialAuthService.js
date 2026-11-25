@@ -6,6 +6,11 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const pool = require("../config/db");
 
+const {
+  validateLegalAcceptance,
+  recordLegalAcceptance
+} = require("./legalAcceptanceService");
+
 function authError(message, status = 400) {
   const error = new Error(message);
   error.status = status;
@@ -40,7 +45,13 @@ function validateIdentity(identity) {
 // Create or authenticate a social account.
 async function authenticateSocialUser(
   identity,
-  { mode = "login", role, termsAccepted = false } = {}
+  {
+    mode = "login",
+    role,
+    termsAccepted = false,
+    termsVersion,
+    privacyVersion
+  } = {}
 ) {
   const profile = validateIdentity(identity);
 
@@ -54,6 +65,14 @@ async function authenticateSocialUser(
       termsAccepted !== true)
   ) {
     throw authError("Valid role and accepted terms are required.");
+  }
+
+  if (mode === "register") {
+    validateLegalAcceptance({
+      termsAccepted,
+      termsVersion,
+      privacyVersion
+    });
   }
 
   if (!process.env.JWT_SECRET) {
@@ -133,6 +152,14 @@ async function authenticateSocialUser(
           profile.email
         ]
       );
+
+      await recordLegalAcceptance(client, {
+        userId: user.id,
+        registrationMethod: profile.provider,
+        termsAccepted,
+        termsVersion,
+        privacyVersion
+      });
 
       created = true;
     }

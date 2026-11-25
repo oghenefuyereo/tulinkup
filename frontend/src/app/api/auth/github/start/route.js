@@ -1,5 +1,7 @@
 
 import { NextResponse } from "next/server";
+import { termsOfService } from "@/content/termsOfService";
+import { privacyPolicy } from "@/content/privacyPolicy";
 import {
   signOAuthSession,
   oauthInternalHeaders
@@ -21,8 +23,13 @@ export async function POST(request) {
       );
     }
 
-    const { mode, role, termsAccepted } =
-      await request.json();
+    const {
+      mode,
+      role,
+      termsAccepted,
+      termsVersion,
+      privacyVersion
+    } = await request.json();
 
     if (!["login", "register"].includes(mode)) {
       return NextResponse.json(
@@ -38,6 +45,22 @@ export async function POST(request) {
     ) {
       return NextResponse.json(
         { message: "Select a role and accept the terms." },
+        { status: 400 }
+      );
+    }
+
+    if (
+      mode === "register" &&
+      (
+        termsVersion !== termsOfService.version ||
+        privacyVersion !== privacyPolicy.version
+      )
+    ) {
+      return NextResponse.json(
+        {
+          message:
+            "The legal documents have changed. Refresh the page and review them again."
+        },
         { status: 400 }
       );
     }
@@ -87,6 +110,10 @@ export async function POST(request) {
         role: mode === "register" ? role : null,
         termsAccepted:
           mode === "register" && termsAccepted === true,
+        termsVersion:
+          mode === "register" ? termsVersion : null,
+        privacyVersion:
+          mode === "register" ? privacyVersion : null,
         expiresAt: Date.now() + 600000
       }),
       {

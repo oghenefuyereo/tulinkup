@@ -87,7 +87,10 @@ export async function POST(request) {
           full_name: fullName,
           email,
           password,
-          role
+          role,
+          termsAccepted: body.termsAccepted,
+          termsVersion: body.termsVersion,
+          privacyVersion: body.privacyVersion
         }),
         cache: "no-store"
       }

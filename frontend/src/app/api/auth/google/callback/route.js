@@ -116,7 +116,9 @@ export async function GET(request) {
           codeVerifier: challenge.codeVerifier,
           mode: challenge.mode,
           role: challenge.role,
-          termsAccepted: challenge.termsAccepted
+          termsAccepted: challenge.termsAccepted,
+          termsVersion: challenge.termsVersion,
+          privacyVersion: challenge.privacyVersion
         })
       }
     );

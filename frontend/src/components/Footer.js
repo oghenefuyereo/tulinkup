@@ -73,8 +73,27 @@ export function Footer() {
       </div>
 
       {/* Display the copyright information at the bottom of the footer. */}
-      <div className="page-wrap mt-12 border-t border-white/10 pt-6 text-xs text-blue-100/60">
-        © 2026 Inovenatic Group. All rights reserved.
+      <div className="page-wrap mt-12 flex flex-col gap-4 border-t border-white/10 pt-6 text-xs text-blue-100/60 md:flex-row md:items-center md:justify-between">
+        <p>© 2026 Inovenatic Group. All rights reserved.</p>
+
+        <nav
+          aria-label="Legal information"
+          className="flex flex-wrap gap-5"
+        >
+          <Link
+            href="/terms"
+            className="transition-colors hover:text-white hover:underline"
+          >
+            Terms of Service
+          </Link>
+
+          <Link
+            href="/privacy"
+            className="transition-colors hover:text-white hover:underline"
+          >
+            Privacy Policy
+          </Link>
+        </nav>
       </div>
     </footer>
   );

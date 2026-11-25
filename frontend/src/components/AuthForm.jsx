@@ -4,6 +4,8 @@
 
 // Import Link for navigation between login and registration pages.
 import Link from "next/link";
+import { termsOfService } from "@/content/termsOfService";
+import { privacyPolicy } from "@/content/privacyPolicy";
 
 // Import useState to manage form information and user interactions.
 import { useState, useEffect } from "react";
@@ -53,21 +55,27 @@ export function AuthForm({
       authentication_failed: "Social authentication failed. Please try again."
     };
 
-    setError(
-      messages[reason] || "Social authentication failed."
-    );
+    const oauthMessage =
+      messages[reason] || "Social authentication failed.";
 
-    params.delete("oauth_error");
+    const timer = window.setTimeout(() => {
+      setError(oauthMessage);
 
-    const query = params.toString();
+      params.delete("oauth_error");
 
-    window.history.replaceState(
-      window.history.state,
-      "",
-      window.location.pathname +
-        (query ? "?" + query : "") +
-        window.location.hash
-    );
+      const query = params.toString();
+
+      window.history.replaceState(
+        window.history.state,
+        "",
+        window.location.pathname +
+          (query ? "?" + query : "") +
+          window.location.hash
+      );
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+
   }, []);
 
   async function startGoogle() {
@@ -76,7 +84,7 @@ export function AuthForm({
     setError("");
 
     if (register && !form.terms) {
-      setError("Accept the terms to create your account.");
+      setError("Accept the Terms of Service and acknowledge the Privacy Policy to create your account.");
       return;
     }
 
@@ -91,7 +99,11 @@ export function AuthForm({
         body: JSON.stringify({
           mode,
           role: form.role,
-          termsAccepted: form.terms
+          termsAccepted: form.terms,
+          ...(register ? {
+            termsVersion: termsOfService.version,
+            privacyVersion: privacyPolicy.version
+          } : {})
         })
       });
 
@@ -123,7 +135,7 @@ export function AuthForm({
     setError("");
 
     if (register && !form.terms) {
-      setError("Accept the terms to create your account.");
+      setError("Accept the Terms of Service and acknowledge the Privacy Policy to create your account.");
       return;
     }
 
@@ -138,7 +150,11 @@ export function AuthForm({
         body: JSON.stringify({
           mode,
           role: form.role,
-          termsAccepted: form.terms
+          termsAccepted: form.terms,
+          ...(register ? {
+            termsVersion: termsOfService.version,
+            privacyVersion: privacyPolicy.version
+          } : {})
         })
       });
 
@@ -193,7 +209,7 @@ export function AuthForm({
 
     // Require users to accept the terms before registering.
     if (register && !form.terms) {
-      setError("Accept the terms to create your account.");
+      setError("Accept the Terms of Service and acknowledge the Privacy Policy to create your account.");
       return;
     }
 
@@ -207,7 +223,16 @@ export function AuthForm({
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(form),
+        body: JSON.stringify(
+          register
+            ? {
+                ...form,
+                termsAccepted: form.terms,
+                termsVersion: termsOfService.version,
+                privacyVersion: privacyPolicy.version
+              }
+            : form
+        ),
       });
 
       // Read the response returned by the API.
@@ -438,7 +463,25 @@ export function AuthForm({
                   className="mt-1 accent-[#26469b]"
                 />
                 <span>
-                  I agree to the terms and privacy policy.
+                  I agree to the{" "}
+                  <Link
+                    href="/terms"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-semibold text-[#26469b] hover:underline"
+                  >
+                    Terms of Service
+                  </Link>
+                  {" "}and acknowledge the{" "}
+                  <Link
+                    href="/privacy"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-semibold text-[#26469b] hover:underline"
+                  >
+                    Privacy Policy
+                  </Link>
+                  .
                 </span>
               </label>
             ) : (
