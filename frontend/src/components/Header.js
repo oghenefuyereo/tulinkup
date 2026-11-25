@@ -52,6 +52,7 @@ export function Header() {
 
     // Courses are currently under development.
     { href: "/courses", label: "Courses" },
+    { href: "/jobs", label: "Jobs" },
 
     // Learn how TuLinkUp works.
     { href: "/#how-it-works", label: "How it works" },
@@ -273,6 +274,14 @@ export function Header() {
               className="nav-link px-3 py-2"
             >
               Courses
+            </Link>
+
+            <Link
+              href="/jobs"
+              onClick={() => setOpen(false)}
+              className="nav-link px-3 py-2"
+            >
+              Jobs
             </Link>
           </nav>
         )}

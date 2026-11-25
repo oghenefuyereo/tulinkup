@@ -21,6 +21,7 @@ export function isPlatformRoute(pathname) {
     "/tutors",
     "/group-classes",
     "/courses",
+    "/jobs",
     "/messages",
     "/saved",
     "/profile",

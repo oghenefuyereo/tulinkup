@@ -30,6 +30,11 @@ const navigation = [
     icon: "courses",
   },
   {
+    label: "Jobs",
+    href: "/jobs",
+    icon: "briefcase",
+  },
+  {
     label: "Messages",
     icon: "message",
     comingSoon: true,

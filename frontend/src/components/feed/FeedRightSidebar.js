@@ -1,3 +1,6 @@
+"use client";
+
+import { usePathname } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { Icon } from "../Icons";
@@ -147,13 +150,58 @@ export function FeedRightSidebar({
   tutorsError = false,
   classesError = false,
 }) {
-  return (
-    <aside
-      aria-label="Learning recommendations"
-      className="hidden min-w-0 space-y-4 xl:sticky xl:top-24 xl:block xl:self-start xl:max-h-[calc(100dvh-7rem)] xl:overflow-y-auto"
-    >
-      {/* Real approved tutor recommendations. */}
-      <SidebarSection
+  const pathname = usePathname() || "/";
+
+  const isSection = (route) =>
+    pathname === route ||
+    pathname.startsWith(route + "/");
+
+  const isCourses = isSection("/courses");
+
+  let sectionOrder = [
+    "tutors",
+    "subjects",
+    "classes",
+    "announcements",
+    "connections",
+  ];
+
+  if (isSection("/tutors")) {
+    sectionOrder = [
+      "subjects",
+      "tutors",
+      "classes",
+    ];
+  } else if (isSection("/group-classes")) {
+    sectionOrder = [
+      "classes",
+      "subjects",
+      "tutors",
+    ];
+  } else if (isCourses) {
+    sectionOrder = [
+      "announcements",
+      "tutors",
+      "classes",
+    ];
+  } else if (isSection("/jobs")) {
+    sectionOrder = [
+      "jobs",
+      "tutors",
+      "subjects",
+      "classes",
+    ];
+  } else if (isSection("/profile")) {
+    sectionOrder = [
+      "tutors",
+      "classes",
+      "announcements",
+    ];
+  }
+
+  const sidebarSections = {
+    tutors: (
+<SidebarSection
         title="Recommended tutors"
         href="/tutors"
         label="View all tutors"
@@ -177,9 +225,9 @@ export function FeedRightSidebar({
           </div>
         )}
       </SidebarSection>
-
-      {/* Existing subject categories. */}
-      <SidebarSection title="Popular subjects">
+    ),
+    subjects: (
+<SidebarSection title="Popular subjects">
         <div id="subjects" className="flex flex-wrap gap-2">
           {subjects.map((subject) => (
             <Link
@@ -196,9 +244,9 @@ export function FeedRightSidebar({
           ))}
         </div>
       </SidebarSection>
-
-      {/* Real upcoming published group classes. */}
-      <SidebarSection
+    ),
+    classes: (
+<SidebarSection
         title="Upcoming classes"
         href="/group-classes"
         label="View all classes"
@@ -222,9 +270,9 @@ export function FeedRightSidebar({
           </div>
         )}
       </SidebarSection>
-
-      {/* Current platform announcement. */}
-      <SidebarSection title="Platform announcements">
+    ),
+    announcements: (
+<SidebarSection title={isCourses ? "Course announcements" : "Platform announcements"}>
         <Link
           href="/courses"
           className="block rounded-xl border border-[#f5c518]/30 bg-[#f5c518]/10 p-4 transition-colors hover:bg-[#f5c518]/20"
@@ -250,9 +298,9 @@ export function FeedRightSidebar({
           </span>
         </Link>
       </SidebarSection>
-
-      {/* Future educational community connections. */}
-      <SidebarSection title="Suggested connections">
+    ),
+    connections: (
+<SidebarSection title="Suggested connections">
         <div className="rounded-xl bg-[#f7f9fd] p-4">
           <Icon
             name="user"
@@ -269,6 +317,44 @@ export function FeedRightSidebar({
           </span>
         </div>
       </SidebarSection>
+    ),
+    jobs: (
+<SidebarSection title="Career announcements">
+        <Link
+          href="/jobs"
+          className="block rounded-xl border border-[#f5c518]/30 bg-[#f5c518]/10 p-4 transition-colors hover:bg-[#f5c518]/20"
+        >
+          <div className="flex items-center gap-2">
+            <Icon
+              name="briefcase"
+              className="h-5 w-5 text-[#26469b]"
+            />
+
+            <h3 className="text-sm font-extrabold text-[#173472]">
+              Jobs are coming soon!
+            </h3>
+          </div>
+
+          <p className="mt-2 text-xs leading-5 text-[#68758c]">
+            Career opportunities, internships and graduate positions are coming to TuLinkUp.
+          </p>
+
+          <span className="mt-3 inline-block text-xs font-bold text-[#26469b]">
+            Learn more
+          </span>
+        </Link>
+      </SidebarSection>
+    ),
+  };
+
+  return (
+    <aside
+      aria-label="Learning recommendations"
+      className="hidden min-w-0 space-y-4 xl:sticky xl:top-24 xl:block xl:self-start xl:max-h-[calc(100dvh-7rem)] xl:overflow-y-auto"
+    >
+      {sectionOrder.map((key) => (
+        <div key={key}>{sidebarSections[key]}</div>
+      ))}
 
       {/* Compact legal and company information. */}
       <div className="px-2 pb-4 text-xs leading-6 text-[#68758c]">

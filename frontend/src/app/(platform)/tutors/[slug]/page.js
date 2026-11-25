@@ -130,7 +130,7 @@ export default async function TutorProfilePage({ params }) {
                         src={tutor.image.url}
                         alt={tutor.image.alt || name}
                         fill
-                        className="object-cover"
+                        className="object-cover object-top"
                         sizes="144px"
                       />
                     ) : (

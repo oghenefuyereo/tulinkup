@@ -18,6 +18,14 @@ export function Icon({ name, ...props }) {
       </>
     ),
 
+    briefcase: (
+      <>
+        <rect x="3" y="7" width="18" height="14" rx="2" />
+        <path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+        <path d="M3 13h18M10 13v2h4v-2" />
+      </>
+    ),
+
     message: (
       <path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5H4l2-4a8.5 8.5 0 1 1 15-4.5Z" />
     ),
