@@ -1,6 +1,20 @@
 // Import the database connection to manage student bookings.
 const pool = require("../config/db");
 
+const {
+  beginBookingTransaction,
+  lockActiveBookingUser,
+  commitBookingTransaction,
+  rollbackBookingTransaction,
+  abortBookingTransaction,
+  releaseBookingTransaction,
+} = require("../services/bookingTransactionService");
+
+const {
+  validateTutorId,
+  lockEligibleTutor,
+} = require("../services/tutorEligibilityService");
+
 // Import shared scheduling conflict validation.
 const {
   lockTutorSchedule,
@@ -245,11 +259,24 @@ async function createBooking(req, res) {
       });
     }
 
-    // Get a database connection for the booking transaction.
-    client = await pool.connect();
+    // Make sure the selected profile and availability IDs are valid.
+    try {
+      validateTutorId(tutorID);
+      validateTutorId(slotID);
+    } catch {
+      return res.status(400).json({
+        error: "Invalid booking information.",
+      });
+    }
 
-    // Start a transaction so the booking checks and insert stay together.
-    await client.query("BEGIN");
+    // Start a secure transaction and verify the student's account.
+    client = await beginBookingTransaction();
+
+    await lockActiveBookingUser(
+      client,
+      req.user.userId,
+      "student"
+    );
 
     // Find the selected tutor and retrieve the current hourly rate.
     const tutorResult = await client.query(
@@ -268,7 +295,7 @@ async function createBooking(req, res) {
 
     // Stop the booking if the tutor profile does not exist.
     if (!tutorResult.rows.length) {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
 
       return res.status(404).json({
         error: "Tutor not found.",
@@ -281,6 +308,20 @@ async function createBooking(req, res) {
     // Lock the tutor's schedule before checking availability.
     // This prevents simultaneous conflicting booking and class requests.
     await lockTutorSchedule(client, tutor.user_id);
+
+    // Keep the tutor eligible until the booking transaction finishes.
+    const eligibility = await lockEligibleTutor(
+      tutor.user_id,
+      client
+    );
+
+    if (eligibility.profileId !== String(tutor.profile_id)) {
+      await rollbackBookingTransaction(client);
+
+      return res.status(409).json({
+        error: "Tutor profile is no longer available.",
+      });
+    }
 
     // Retrieve and lock the latest tutor profile before calculating pricing.
     const pricingResult = await client.query(
@@ -298,7 +339,7 @@ async function createBooking(req, res) {
 
     // Stop if the tutor profile is no longer available.
     if (!pricingResult.rows.length) {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
 
       return res.status(404).json({
         error: "Tutor profile is no longer available.",
@@ -352,7 +393,7 @@ async function createBooking(req, res) {
         pricing
       );
     } catch (error) {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
 
       return res.status(409).json({
         error: error.message,
@@ -361,7 +402,7 @@ async function createBooking(req, res) {
 
     // Prevent paid bookings until Stripe checkout is implemented.
     if (totalPriceCents > 0) {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
 
       return res.status(409).json({
         error:
@@ -377,7 +418,7 @@ async function createBooking(req, res) {
 
     // Make sure the tutor offers the subject selected by the student.
     if (!tutorSubjects.includes(String(subjectID))) {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
 
       return res.status(400).json({
         error: "This tutor does not offer that subject.",
@@ -408,7 +449,7 @@ async function createBooking(req, res) {
 
     // Stop if the selected time slot is no longer available.
     if (!slotResult.rows.length) {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
 
       return res.status(409).json({
         error: "This time slot is no longer available.",
@@ -433,7 +474,7 @@ async function createBooking(req, res) {
 
     // Make sure the requested session fits within the available time.
     if (startMinutes + durationMinutes > endMinutes) {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
 
       return res.status(400).json({
         error:
@@ -467,7 +508,7 @@ async function createBooking(req, res) {
 
     // Prevent the tutor from receiving overlapping booking requests.
     if (conflict.rows.length) {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
 
       return res.status(409).json({
         error:
@@ -485,7 +526,7 @@ async function createBooking(req, res) {
 
     // Prevent students from booking tutoring sessions in the past.
     if (new Date(bookingStartTime) <= new Date()) {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
 
       return res.status(400).json({
         error:
@@ -503,7 +544,7 @@ async function createBooking(req, res) {
 
     // Prevent one-on-one bookings that overlap with group classes.
     if (groupConflict) {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
 
       return res.status(409).json({
         error:
@@ -564,8 +605,17 @@ async function createBooking(req, res) {
       ]
     );
 
+    // Make sure exactly one booking was created.
+    if (
+      result.command !== "INSERT" ||
+      result.rowCount !== 1 ||
+      result.rows.length !== 1
+    ) {
+      throw new Error("Booking insert could not be verified.");
+    }
+
     // Save the transaction after the booking is created successfully.
-    await client.query("COMMIT");
+    await commitBookingTransaction(client);
 
     // Confirm that the booking request was submitted.
     return res.status(201).json({
@@ -574,19 +624,56 @@ async function createBooking(req, res) {
       booking: result.rows[0],
     });
   } catch (error) {
-    // Undo the transaction if something goes wrong.
+    // Roll back unfinished changes before responding.
     if (client) {
-      await client.query("ROLLBACK").catch(
-        (rollbackError) => {
-          console.error(
-            "Booking rollback error:",
-            rollbackError
-          );
-        }
-      );
+      try {
+        await abortBookingTransaction(client);
+      } catch (rollbackError) {
+        error = rollbackError;
+      }
     }
 
-    console.error("Create booking error:", error);
+    if (error.code === "BOOKING_COMMIT_UNCERTAIN") {
+      return res.status(503).json({
+        success: false,
+        code: "BOOKING_COMMIT_UNCERTAIN",
+        error: "The booking outcome requires verification. Refresh before trying again.",
+      });
+    }
+
+    if (error.code === "BOOKING_ROLLBACK_FAILED") {
+      return res.status(503).json({
+        success: false,
+        error: "The booking operation could not be safely completed.",
+      });
+    }
+
+    if (error.statusCode === 403) {
+      return res.status(403).json({
+        error: "An active account is required.",
+      });
+    }
+
+    if (error.statusCode === 400) {
+      return res.status(400).json({
+        error: "Invalid booking information.",
+      });
+    }
+
+    if (["55P03", "57014", "40P01"].includes(error.code)) {
+      return res.status(503).json({
+        success: false,
+        error: "Booking service temporarily busy. Please try again.",
+      });
+    }
+
+    if (error.statusCode === 409) {
+      return res.status(409).json({
+        error: "This tutor is not currently eligible to offer tutoring services.",
+      });
+    }
+
+    console.error("Booking creation failed.");
 
     return res.status(500).json({
       error: "Unable to create booking.",
@@ -594,7 +681,7 @@ async function createBooking(req, res) {
   } finally {
     // Release the database connection when the request is finished.
     if (client) {
-      client.release();
+      releaseBookingTransaction(client);
     }
   }
 }
@@ -632,11 +719,23 @@ async function updateBookingStatus(req, res) {
       });
     }
 
-    // Get a database connection for the status update.
-    client = await pool.connect();
+    // Reject invalid booking IDs before opening a transaction.
+    try {
+      validateTutorId(req.params.id);
+    } catch {
+      return res.status(400).json({
+        error: "Invalid booking ID.",
+      });
+    }
 
-    // Start a transaction before updating the booking.
-    await client.query("BEGIN");
+    // Verify the account before locking the booking.
+    client = await beginBookingTransaction();
+
+    await lockActiveBookingUser(
+      client,
+      userId,
+      role
+    );
 
     // Find the booking and lock it while checking the status change.
     const result = await client.query(
@@ -649,7 +748,7 @@ async function updateBookingStatus(req, res) {
 
     // Stop if the booking does not exist.
     if (!result.rows.length) {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
 
       return res.status(404).json({
         error: "Booking not found.",
@@ -671,7 +770,7 @@ async function updateBookingStatus(req, res) {
 
     // Prevent other users from changing someone else's booking.
     if (!isStudent && !isTutor) {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
 
       return res.status(403).json({
         error: "You cannot update this booking.",
@@ -701,11 +800,19 @@ async function updateBookingStatus(req, res) {
 
     // Reject status changes that do not follow these rules.
     if (!allowed) {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
 
       return res.status(400).json({
         error: "That status change is not allowed.",
       });
+    }
+
+    // Only eligible tutors can accept new booking requests.
+    if (isTutor && status === "accepted") {
+      await lockEligibleTutor(
+        booking.tutor_id,
+        client
+      );
     }
 
     // Prevent cancellation or rejection while a payment requires handling.
@@ -715,7 +822,7 @@ async function updateBookingStatus(req, res) {
         booking.payment_status
       )
     ) {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
 
       return res.status(409).json({
         error:
@@ -728,7 +835,7 @@ async function updateBookingStatus(req, res) {
       ["accepted", "completed"].includes(status) &&
       !hasValidBookingPayment(booking)
     ) {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
 
       return res.status(409).json({
         error:
@@ -747,29 +854,79 @@ async function updateBookingStatus(req, res) {
       [status, booking.id]
     );
 
+    // Verify the booking and prepare its response before committing.
+    if (
+      updated.command !== "UPDATE" ||
+      updated.rowCount !== 1 ||
+      updated.rows.length !== 1 ||
+      String(updated.rows[0].id) !== String(booking.id) ||
+      updated.rows[0].status !== status
+    ) {
+      throw new Error("Booking update could not be verified.");
+    }
+
+    const responseBooking = formatBooking(updated.rows[0]);
+
     // Save the changes once the update succeeds.
-    await client.query("COMMIT");
+    await commitBookingTransaction(client);
 
     // Send the updated booking information back to the frontend.
     return res.json({
       success: true,
       message: "Booking updated successfully.",
-      booking: formatBooking(updated.rows[0]),
+      booking: responseBooking,
     });
   } catch (error) {
-    // Undo any changes if the update fails.
+    // Roll back unfinished changes before responding.
     if (client) {
-      await client.query("ROLLBACK").catch(
-        (rollbackError) => {
-          console.error(
-            "Booking status rollback error:",
-            rollbackError
-          );
-        }
-      );
+      try {
+        await abortBookingTransaction(client);
+      } catch (rollbackError) {
+        error = rollbackError;
+      }
     }
 
-    console.error("Update booking error:", error);
+    if (error.code === "BOOKING_COMMIT_UNCERTAIN") {
+      return res.status(503).json({
+        success: false,
+        code: "BOOKING_COMMIT_UNCERTAIN",
+        error: "The booking outcome requires verification. Refresh before trying again.",
+      });
+    }
+
+    if (error.code === "BOOKING_ROLLBACK_FAILED") {
+      return res.status(503).json({
+        success: false,
+        error: "The booking operation could not be safely completed.",
+      });
+    }
+
+    if (error.statusCode === 403) {
+      return res.status(403).json({
+        error: "An active account is required.",
+      });
+    }
+
+    if (error.statusCode === 400) {
+      return res.status(400).json({
+        error: "Invalid booking information.",
+      });
+    }
+
+    if (["55P03", "57014", "40P01"].includes(error.code)) {
+      return res.status(503).json({
+        success: false,
+        error: "Booking service temporarily busy. Please try again.",
+      });
+    }
+
+    if (error.statusCode === 409) {
+      return res.status(409).json({
+        error: "This tutor is not currently eligible to offer tutoring services.",
+      });
+    }
+
+    console.error("Booking status update failed.");
 
     return res.status(500).json({
       error: "Unable to update booking.",
@@ -777,7 +934,7 @@ async function updateBookingStatus(req, res) {
   } finally {
     // Return the database connection to the pool.
     if (client) {
-      client.release();
+      releaseBookingTransaction(client);
     }
   }
 }

@@ -39,4 +39,14 @@ const {
 
 router.get("/audit-logs", getAdminAuditLogs);
 
+const {
+  changeTutorApproval,
+} = require("../controllers/adminTutorApprovalController");
+
+// Allow administrators to approve or reject tutor profiles.
+router.patch(
+  "/tutors/:profileId/approval",
+  changeTutorApproval
+);
+
 module.exports = router;

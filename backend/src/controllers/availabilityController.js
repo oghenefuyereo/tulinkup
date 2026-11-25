@@ -302,12 +302,14 @@ async function deleteAvailability(req, res) {
 
 // Get a tutor's available time slots for students to view.
 async function getTutorAvailability(req, res) {
+  res.set("Cache-Control", "no-store");
+
   try {
     // Get the tutor's ID from the URL.
     const tutorId = req.params.tutorId;
 
     // Find available slots that have not already passed.
-    // Only include tutors who have a profile.
+    // Only show availability for active tutors with approved profiles.
     const result = await pool.query(
       `SELECT
          a.id,
@@ -319,7 +321,12 @@ async function getTutorAvailability(req, res) {
        FROM public.tutor_availability a
        JOIN public.tutor_profiles tp
          ON tp.user_id = a.tutor_id
+       JOIN public.users u
+         ON u.id = a.tutor_id
        WHERE a.tutor_id = $1
+         AND u.role = 'tutor'
+         AND u.account_status = 'active'
+         AND tp.approval_status = 'approved'
          AND a.is_available = TRUE
          AND (
            a.available_date > CURRENT_DATE

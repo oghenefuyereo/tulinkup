@@ -1,3 +1,5 @@
+import { AdminDashboardShell } from "@/components/AdminDashboardShell";
+
 // Import server-side authentication utilities.
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -128,8 +130,8 @@ export default async function AdminDashboard() {
 
   // Render administrator content only after successful verification.
   return (
-    <main className="min-h-screen bg-[#f7f9fd]">
-      <div className="mx-auto max-w-7xl px-6 py-10">
+    <AdminDashboardShell name={fullName}>
+      <div className="min-w-0">
 
         <p className="eyebrow">
           TuLinkUp Administration
@@ -186,6 +188,6 @@ export default async function AdminDashboard() {
         </section>
 
       </div>
-    </main>
+    </AdminDashboardShell>
   );
 }

@@ -124,6 +124,8 @@ const tutorSelect = `
   FROM public.tutor_profiles tp
   JOIN public.users u ON u.id = tp.user_id
   WHERE u.role = 'tutor'
+    AND u.account_status = 'active'
+    AND tp.approval_status = 'approved'
 `;
 
 // Create a unique URL slug using the tutor's name and user ID.
@@ -223,6 +225,8 @@ async function getMyTutorProfile(req, res) {
 
 // Get a list of tutor profiles for the platform.
 async function getTutors(req, res) {
+  res.set("Cache-Control", "no-store");
+
   try {
     // Retrieve up to 100 tutors, sorted alphabetically by name.
     const result = await pool.query(
@@ -299,6 +303,8 @@ async function findTutorBySlug(slug) {
 
 // Get a tutor's public profile using their URL slug.
 async function getTutorBySlug(req, res) {
+  res.set("Cache-Control", "no-store");
+
   try {
     // Find the tutor using the slug provided in the URL.
     const tutor = await findTutorBySlug(
@@ -329,6 +335,8 @@ async function getTutorBySlug(req, res) {
 
 // Get additional information for a tutor's public profile.
 async function getTutorExtras(req, res) {
+  res.set("Cache-Control", "no-store");
+
   try {
     // Find the tutor using their profile URL.
     const tutor = await findTutorBySlug(
@@ -348,14 +356,28 @@ async function getTutorExtras(req, res) {
     // Get the tutor's upcoming availability, limited to 20 slots.
     const result = await pool.query(
       `SELECT
-        id,
-        available_date AS date,
-        start_time AS "startTime",
-        end_time AS "endTime"
-       FROM public.tutor_availability
-       WHERE tutor_id = $1
-         AND available_date >= CURRENT_DATE
-       ORDER BY available_date, start_time
+        a.id,
+        a.available_date AS date,
+        a.start_time AS "startTime",
+        a.end_time AS "endTime"
+       FROM public.tutor_availability a
+       JOIN public.users u
+         ON u.id = a.tutor_id
+       JOIN public.tutor_profiles tp
+         ON tp.user_id = a.tutor_id
+       WHERE a.tutor_id = $1
+         AND u.role = 'tutor'
+         AND u.account_status = 'active'
+         AND tp.approval_status = 'approved'
+         AND a.is_available = TRUE
+         AND (
+           a.available_date > CURRENT_DATE
+           OR (
+             a.available_date = CURRENT_DATE
+             AND a.end_time > LOCALTIME
+           )
+         )
+       ORDER BY a.available_date, a.start_time
        LIMIT 20`,
       [tutor.userId]
     );

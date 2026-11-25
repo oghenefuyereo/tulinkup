@@ -1,5 +1,19 @@
 const pool = require("../config/db");
 
+const {
+  validateTutorId,
+  lockEligibleTutor,
+} = require("../services/tutorEligibilityService");
+
+const {
+  beginBookingTransaction,
+  lockActiveBookingUser,
+  commitBookingTransaction,
+  rollbackBookingTransaction,
+  abortBookingTransaction,
+  releaseBookingTransaction,
+} = require("../services/bookingTransactionService");
+
 // Import shared scheduling conflict validation.
 const {
   lockTutorSchedule,
@@ -26,7 +40,60 @@ function fail(res, status, message) {
 
 // Check whether a class ID is valid.
 function validId(id) {
-  return /^\d+$/.test(String(id));
+  try {
+    validateTutorId(id);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Return a safe response when a class transaction fails.
+function groupTransactionError(res, error, message) {
+  res.set("Cache-Control", "no-store");
+
+  if (error.code === "BOOKING_COMMIT_UNCERTAIN") {
+    return res.status(503).json({
+      success: false,
+      code: "GROUP_CLASS_COMMIT_UNCERTAIN",
+      message: "The operation outcome requires verification. Refresh before trying again.",
+    });
+  }
+
+  if (error.code === "BOOKING_ROLLBACK_FAILED") {
+    return fail(
+      res,
+      503,
+      "The class operation could not be safely completed."
+    );
+  }
+
+  if (["55P03", "57014", "40P01"].includes(error.code)) {
+    return fail(
+      res,
+      503,
+      "The class service is temporarily busy. Please try again."
+    );
+  }
+
+  if (error.statusCode === 403) {
+    return fail(res, 403, "An active account is required.");
+  }
+
+  if (error.statusCode === 400) {
+    return fail(res, 400, "Invalid class information.");
+  }
+
+  if (error.statusCode === 409) {
+    return fail(
+      res,
+      409,
+      "This tutor is not currently eligible to offer tutoring services."
+    );
+  }
+
+  console.error("Group class transaction failed.");
+  return fail(res, 500, message);
 }
 
 // Validate class information.
@@ -131,13 +198,28 @@ const classSelect = `
   JOIN public.users u ON u.id = gc.tutor_id
 `;
 
+// Only show public classes offered by eligible tutors.
+const publicTutorEligibility = `
+  AND u.role = 'tutor'
+  AND u.account_status = 'active'
+  AND EXISTS (
+    SELECT 1
+    FROM public.tutor_profiles tp
+    WHERE tp.user_id = gc.tutor_id
+      AND tp.approval_status = 'approved'
+  )
+`;
+
 // Browse published group classes.
 async function getGroupClasses(req, res) {
+  res.set("Cache-Control", "no-store");
+
   try {
     const result = await pool.query(`
       ${classSelect}
       WHERE gc.status = 'published'
       AND gc.scheduled_at > NOW()
+      ${publicTutorEligibility}
       ORDER BY gc.scheduled_at ASC
       LIMIT 100
     `);
@@ -154,6 +236,8 @@ async function getGroupClasses(req, res) {
 
 // View a published or active live class.
 async function getGroupClassById(req, res) {
+  res.set("Cache-Control", "no-store");
+
   try {
     const { id } = req.params;
 
@@ -166,6 +250,7 @@ async function getGroupClassById(req, res) {
         ${classSelect}
         WHERE gc.id = $1
         AND gc.status IN ('published', 'live')
+        ${publicTutorEligibility}
       `,
       [id]
     );
@@ -173,9 +258,6 @@ async function getGroupClassById(req, res) {
     if (!result.rows.length) {
       return fail(res, 404, "Group class not found.");
     }
-
-    // Prevent stale classroom status responses.
-    res.set("Cache-Control", "no-store");
 
     res.json({
       success: true,
@@ -215,6 +297,7 @@ async function getMyGroupClasses(req, res) {
 
 // Create a group class as a draft.
 async function createGroupClass(req, res) {
+  res.set("Cache-Control", "no-store");
   if (req.user.role !== "tutor") {
     return fail(res, 403, "Only tutors can create group classes.");
   }
@@ -222,8 +305,14 @@ async function createGroupClass(req, res) {
   let client;
 
   try {
-    client = await pool.connect();
-    await client.query("BEGIN");
+    client = await beginBookingTransaction();
+
+    // Make sure the account is still active.
+    await lockActiveBookingUser(
+      client,
+      req.user.userId,
+      "tutor"
+    );
 
     // Retrieve the current platform pricing configuration.
     const pricing = await getPricingConfig(client);
@@ -233,7 +322,7 @@ async function createGroupClass(req, res) {
     try {
       values = validateClass(req.body || {}, pricing);
     } catch (error) {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
       return fail(res, 400, error.message);
     }
 
@@ -249,7 +338,7 @@ async function createGroupClass(req, res) {
     );
 
     if (!tutor.rows.length) {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
       return fail(res, 403, "Complete your tutor profile first.");
     }
 
@@ -276,7 +365,16 @@ async function createGroupClass(req, res) {
       [req.user.userId, ...values]
     );
 
-    await client.query("COMMIT");
+    // Verify the database write before committing.
+    if (
+      result.command !== "INSERT" ||
+      result.rowCount !== 1 ||
+      result.rows.length !== 1
+    ) {
+      throw new Error("Unexpected class write result.");
+    }
+
+    await commitBookingTransaction(client);
 
     res.status(201).json({
       success: true,
@@ -285,18 +383,28 @@ async function createGroupClass(req, res) {
     });
   } catch (error) {
     if (client) {
-      await client.query("ROLLBACK").catch(console.error);
+      try {
+        await abortBookingTransaction(client);
+      } catch (rollbackError) {
+        error = rollbackError;
+      }
     }
 
-    console.error("Create group class error:", error.message);
-    return fail(res, 500, "Unable to create group class.");
+    return groupTransactionError(
+      res,
+      error,
+      "Unable to create group class."
+    );
   } finally {
-    if (client) client.release();
+    if (client) {
+      releaseBookingTransaction(client);
+    }
   }
 }
 
 // Edit a tutor's draft class.
 async function updateGroupClass(req, res) {
+  res.set("Cache-Control", "no-store");
   if (req.user.role !== "tutor") {
     return fail(res, 403, "Only tutors can edit group classes.");
   }
@@ -310,8 +418,14 @@ async function updateGroupClass(req, res) {
   let client;
 
   try {
-    client = await pool.connect();
-    await client.query("BEGIN");
+    client = await beginBookingTransaction();
+
+    // Make sure the account is still active.
+    await lockActiveBookingUser(
+      client,
+      req.user.userId,
+      "tutor"
+    );
 
     // Retrieve the current platform pricing configuration.
     const pricing = await getPricingConfig(client);
@@ -321,7 +435,7 @@ async function updateGroupClass(req, res) {
     try {
       values = validateClass(req.body || {}, pricing);
     } catch (error) {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
       return fail(res, 400, error.message);
     }
 
@@ -348,11 +462,20 @@ async function updateGroupClass(req, res) {
     );
 
     if (!result.rows.length) {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
       return fail(res, 404, "Editable draft class not found.");
     }
 
-    await client.query("COMMIT");
+    // Verify the database write before committing.
+    if (
+      result.command !== "UPDATE" ||
+      result.rowCount !== 1 ||
+      result.rows.length !== 1
+    ) {
+      throw new Error("Unexpected class write result.");
+    }
+
+    await commitBookingTransaction(client);
 
     res.json({
       success: true,
@@ -361,18 +484,28 @@ async function updateGroupClass(req, res) {
     });
   } catch (error) {
     if (client) {
-      await client.query("ROLLBACK").catch(console.error);
+      try {
+        await abortBookingTransaction(client);
+      } catch (rollbackError) {
+        error = rollbackError;
+      }
     }
 
-    console.error("Update group class error:", error.message);
-    return fail(res, 500, "Unable to update group class.");
+    return groupTransactionError(
+      res,
+      error,
+      "Unable to update group class."
+    );
   } finally {
-    if (client) client.release();
+    if (client) {
+      releaseBookingTransaction(client);
+    }
   }
 }
 
 // Publish a draft class or cancel a class.
 async function updateGroupClassStatus(req, res) {
+  res.set("Cache-Control", "no-store");
   if (req.user.role !== "tutor") {
     return fail(res, 403, "Only tutors can manage class status.");
   }
@@ -391,8 +524,14 @@ async function updateGroupClassStatus(req, res) {
   let client;
 
   try {
-    client = await pool.connect();
-    await client.query("BEGIN");
+    client = await beginBookingTransaction();
+
+    // Make sure the account is still active.
+    await lockActiveBookingUser(
+      client,
+      req.user.userId,
+      "tutor"
+    );
 
     // Lock the tutor's schedule before checking for conflicts.
     await lockTutorSchedule(client, req.user.userId);
@@ -410,17 +549,19 @@ async function updateGroupClassStatus(req, res) {
     const groupClass = result.rows[0];
 
     if (!groupClass) {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
       return fail(res, 404, "Group class not found.");
     }
 
     if (status === "published") {
+      // Only approved tutors can publish classes.
+      await lockEligibleTutor(req.user.userId, client);
       // Only future draft classes can be published.
       if (
         groupClass.status !== "draft" ||
         new Date(groupClass.scheduled_at) <= new Date()
       ) {
-        await client.query("ROLLBACK");
+        await rollbackBookingTransaction(client);
         return fail(res, 409, "This class cannot be published.");
       }
 
@@ -440,7 +581,7 @@ async function updateGroupClassStatus(req, res) {
           throw new Error("Invalid group class currency.");
         }
       } catch (error) {
-        await client.query("ROLLBACK");
+        await rollbackBookingTransaction(client);
         return fail(res, 400, error.message);
       }
 
@@ -455,7 +596,7 @@ async function updateGroupClassStatus(req, res) {
 
       // Prevent publishing overlapping group classes.
       if (groupConflict) {
-        await client.query("ROLLBACK");
+        await rollbackBookingTransaction(client);
 
         return fail(
           res,
@@ -474,7 +615,7 @@ async function updateGroupClassStatus(req, res) {
 
       // Prevent conflicts with existing tutoring bookings.
       if (bookingConflict) {
-        await client.query("ROLLBACK");
+        await rollbackBookingTransaction(client);
 
         return fail(
           res,
@@ -486,7 +627,7 @@ async function updateGroupClassStatus(req, res) {
 
     if (status === "cancelled") {
       if (!["draft", "published"].includes(groupClass.status)) {
-        await client.query("ROLLBACK");
+        await rollbackBookingTransaction(client);
         return fail(res, 409, "This class cannot be cancelled.");
       }
 
@@ -505,7 +646,7 @@ async function updateGroupClassStatus(req, res) {
       );
 
       if (payments.rows.length) {
-        await client.query("ROLLBACK");
+        await rollbackBookingTransaction(client);
         return fail(res, 409, "Payment review is required.");
       }
 
@@ -532,7 +673,18 @@ async function updateGroupClassStatus(req, res) {
       [status, id]
     );
 
-    await client.query("COMMIT");
+    // Verify the database write before committing.
+    if (
+      updated.command !== "UPDATE" ||
+      updated.rowCount !== 1 ||
+      updated.rows.length !== 1 ||
+      String(updated.rows[0].id) !== String(id) ||
+      updated.rows[0].status !== status
+    ) {
+      throw new Error("Unexpected class write result.");
+    }
+
+    await commitBookingTransaction(client);
 
     res.json({
       success: true,
@@ -541,18 +693,28 @@ async function updateGroupClassStatus(req, res) {
     });
   } catch (error) {
     if (client) {
-      await client.query("ROLLBACK").catch(console.error);
+      try {
+        await abortBookingTransaction(client);
+      } catch (rollbackError) {
+        error = rollbackError;
+      }
     }
 
-    console.error("Class status error:", error.message);
-    return fail(res, 500, "Unable to update class status.");
+    return groupTransactionError(
+      res,
+      error,
+      "Unable to update class status."
+    );
   } finally {
-    if (client) client.release();
+    if (client) {
+      releaseBookingTransaction(client);
+    }
   }
 }
 
 // Enrol a student in a free group class.
 async function enrollInGroupClass(req, res) {
+  res.set("Cache-Control", "no-store");
   if (req.user.role !== "student") {
     return fail(res, 403, "Only students can enrol.");
   }
@@ -566,8 +728,14 @@ async function enrollInGroupClass(req, res) {
   let client;
 
   try {
-    client = await pool.connect();
-    await client.query("BEGIN");
+    client = await beginBookingTransaction();
+
+    // Make sure the account is still active.
+    await lockActiveBookingUser(
+      client,
+      req.user.userId,
+      "student"
+    );
 
     // Lock the class to prevent simultaneous overbooking.
     const classResult = await client.query(
@@ -583,7 +751,7 @@ async function enrollInGroupClass(req, res) {
     const groupClass = classResult.rows[0];
 
     if (!groupClass) {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
       return fail(res, 404, "Group class not found.");
     }
 
@@ -591,9 +759,12 @@ async function enrollInGroupClass(req, res) {
       groupClass.status !== "published" ||
       new Date(groupClass.scheduled_at) <= new Date()
     ) {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
       return fail(res, 409, "This class is not open for enrolment.");
     }
+
+    // Make sure the tutor is still eligible to offer this class.
+    await lockEligibleTutor(groupClass.tutor_id, client);
 
     // Retrieve the current platform pricing configuration.
     const pricing = await getPricingConfig(client);
@@ -628,32 +799,19 @@ async function enrollInGroupClass(req, res) {
         pricing
       );
     } catch (error) {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
       return fail(res, 409, error.message);
     }
 
     // Paid enrolments require verified payment integration.
     if (priceCents > 0) {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
 
       return fail(
         res,
         409,
         "Payments are not available yet. Please select a free class."
       );
-    }
-
-    const student = await client.query(
-      `
-        SELECT id FROM public.users
-        WHERE id = $1 AND role = 'student'
-      `,
-      [req.user.userId]
-    );
-
-    if (!student.rows.length) {
-      await client.query("ROLLBACK");
-      return fail(res, 403, "Student account not found.");
     }
 
     // Check whether the student already has an enrolment.
@@ -674,7 +832,7 @@ async function enrollInGroupClass(req, res) {
       existingEnrollment &&
       existingEnrollment.enrollment_status !== "cancelled"
     ) {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
 
       return fail(res, 409, "An enrolment already exists.");
     }
@@ -689,7 +847,7 @@ async function enrollInGroupClass(req, res) {
         )
       )
     ) {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
 
       return fail(res, 409, "Payment review is required.");
     }
@@ -711,7 +869,7 @@ async function enrollInGroupClass(req, res) {
 
     // Prevent new enrolment or re-enrolment when the class is full.
     if (enrolledStudents >= groupClass.maximum_students) {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
       return fail(res, 409, "This group class is full.");
     }
 
@@ -784,7 +942,17 @@ async function enrollInGroupClass(req, res) {
       );
     }
 
-    await client.query("COMMIT");
+    // Verify the database write before committing.
+    if (
+      result.command !== (existingEnrollment ? "UPDATE" : "INSERT") ||
+      result.rowCount !== 1 ||
+      result.rows.length !== 1 ||
+      result.rows[0].enrollment_status !== "confirmed"
+    ) {
+      throw new Error("Unexpected class write result.");
+    }
+
+    await commitBookingTransaction(client);
 
     res.status(existingEnrollment ? 200 : 201).json({
       success: true,
@@ -795,22 +963,32 @@ async function enrollInGroupClass(req, res) {
     });
   } catch (error) {
     if (client) {
-      await client.query("ROLLBACK").catch(console.error);
+      try {
+        await abortBookingTransaction(client);
+      } catch (rollbackError) {
+        error = rollbackError;
+      }
     }
 
     if (error.code === "23505") {
       return fail(res, 409, "An enrolment already exists.");
     }
 
-    console.error("Group enrolment error:", error.message);
-    return fail(res, 500, "Unable to enrol in this class.");
+    return groupTransactionError(
+      res,
+      error,
+      "Unable to enrol in this class."
+    );
   } finally {
-    if (client) client.release();
+    if (client) {
+      releaseBookingTransaction(client);
+    }
   }
 }
 
 // Allow a student to cancel their group class enrolment.
 async function cancelEnrollment(req, res) {
+  res.set("Cache-Control", "no-store");
   // Only students can cancel their own enrolments.
   if (req.user.role !== "student") {
     return fail(res, 403, "Only students can cancel enrolments.");
@@ -826,8 +1004,14 @@ async function cancelEnrollment(req, res) {
   let client;
 
   try {
-    client = await pool.connect();
-    await client.query("BEGIN");
+    client = await beginBookingTransaction();
+
+    // Make sure the account is still active.
+    await lockActiveBookingUser(
+      client,
+      req.user.userId,
+      "student"
+    );
 
     // Lock the class to prevent simultaneous enrolment changes.
     const classResult = await client.query(
@@ -843,7 +1027,7 @@ async function cancelEnrollment(req, res) {
     const groupClass = classResult.rows[0];
 
     if (!groupClass) {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
       return fail(res, 404, "Group class not found.");
     }
 
@@ -852,7 +1036,7 @@ async function cancelEnrollment(req, res) {
       groupClass.status !== "published" ||
       new Date(groupClass.scheduled_at) <= new Date()
     ) {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
 
       return fail(
         res,
@@ -876,14 +1060,14 @@ async function cancelEnrollment(req, res) {
     const enrollment = enrollmentResult.rows[0];
 
     if (!enrollment) {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
 
       return fail(res, 404, "Enrolment not found.");
     }
 
     // Prevent repeated cancellation.
     if (enrollment.enrollment_status === "cancelled") {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
 
       return fail(
         res,
@@ -898,7 +1082,7 @@ async function cancelEnrollment(req, res) {
         enrollment.enrollment_status
       )
     ) {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
 
       return fail(
         res,
@@ -914,7 +1098,7 @@ async function cancelEnrollment(req, res) {
         enrollment.payment_status
       )
     ) {
-      await client.query("ROLLBACK");
+      await rollbackBookingTransaction(client);
 
       return fail(res, 409, "Payment review is required.");
     }
@@ -933,7 +1117,17 @@ async function cancelEnrollment(req, res) {
       [enrollment.id]
     );
 
-    await client.query("COMMIT");
+    // Verify the database write before committing.
+    if (
+      result.command !== "UPDATE" ||
+      result.rowCount !== 1 ||
+      result.rows.length !== 1 ||
+      result.rows[0].enrollment_status !== "cancelled"
+    ) {
+      throw new Error("Unexpected class write result.");
+    }
+
+    await commitBookingTransaction(client);
 
     // Confirm that the enrolment was cancelled.
     return res.json({
@@ -943,14 +1137,22 @@ async function cancelEnrollment(req, res) {
     });
   } catch (error) {
     if (client) {
-      await client.query("ROLLBACK").catch(console.error);
+      try {
+        await abortBookingTransaction(client);
+      } catch (rollbackError) {
+        error = rollbackError;
+      }
     }
 
-    console.error("Cancel enrolment error:", error.message);
-
-    return fail(res, 500, "Unable to cancel enrolment.");
+    return groupTransactionError(
+      res,
+      error,
+      "Unable to cancel enrolment."
+    );
   } finally {
-    if (client) client.release();
+    if (client) {
+      releaseBookingTransaction(client);
+    }
   }
 }
 

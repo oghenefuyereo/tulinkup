@@ -67,11 +67,18 @@ export function Header() {
     };
   }, [pathname]);
 
-  // Choose the correct dashboard based on the user's role.
+  // Send each user to the dashboard for their account role.
+  const dashboards = {
+    admin: "/dashboard/admin",
+    student: "/dashboard/student",
+    tutor: "/dashboard/tutor",
+  };
+
   const dashboard =
-    user?.role === "tutor"
-      ? "/dashboard/tutor"
-      : "/dashboard/student";
+    typeof user?.role === "string" &&
+    Object.hasOwn(dashboards, user.role)
+      ? dashboards[user.role]
+      : "/login";
 
   // Define the main navigation links.
   const links = [

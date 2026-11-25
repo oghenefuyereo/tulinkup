@@ -77,6 +77,8 @@ function formatTutorPricing(tutor, pricing) {
 
 // Get all tutor profiles, including the subjects they teach.
 const getTutorProfiles = async (req, res) => {
+  res.set("Cache-Control", "no-store");
+
   try {
     // Retrieve the current platform pricing rules.
     const pricing = await getPricingConfig();
@@ -110,10 +112,15 @@ const getTutorProfiles = async (req, res) => {
           '[]'::json
         ) AS subjects
       FROM public.tutor_profiles tp
+      JOIN public.users u
+        ON u.id = tp.user_id
       LEFT JOIN public.tutor_subjects ts
         ON ts.tutor_profile_id = tp.id
       LEFT JOIN public.subjects s
         ON s.id = ts.subject_id
+      WHERE u.role = 'tutor'
+        AND u.account_status = 'active'
+        AND tp.approval_status = 'approved'
       GROUP BY tp.id
       ORDER BY tp.featured DESC, tp.rating DESC, tp.id DESC
     `);
@@ -144,12 +151,19 @@ const getTutorProfiles = async (req, res) => {
 
 // Get a specific tutor profile using its unique URL slug.
 const getTutorProfileBySlug = async (req, res) => {
+  res.set("Cache-Control", "no-store");
+
   try {
     // Search for the tutor profile using the slug from the URL.
     const result = await pool.query(
-      `SELECT *
-       FROM public.tutor_profiles
-       WHERE slug = $1`,
+      `SELECT tp.*
+       FROM public.tutor_profiles tp
+       JOIN public.users u
+         ON u.id = tp.user_id
+       WHERE tp.slug = $1
+         AND u.role = 'tutor'
+         AND u.account_status = 'active'
+         AND tp.approval_status = 'approved'`,
       [req.params.slug]
     );
 

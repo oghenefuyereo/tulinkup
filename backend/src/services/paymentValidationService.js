@@ -73,6 +73,7 @@ async function authorizeStudent(user, db = pool) {
      FROM public.users
      WHERE id = $1
        AND role = 'student'
+     AND account_status = 'active'
      LIMIT 1`,
     [studentId]
   );
@@ -109,6 +110,7 @@ async function validateTutorPaymentAccount(
        ON u.id = a.tutor_id
      WHERE a.tutor_id = $1
        AND u.role = 'tutor'
+       AND u.account_status = 'active'
        AND a.livemode = FALSE
      LIMIT 1`,
     [id]
@@ -196,6 +198,7 @@ async function validateBookingPayment(
      JOIN public.users u
        ON u.id = b.student_id
        AND u.role = 'student'
+     AND u.account_status = 'active'
      WHERE b.id = $1
        AND b.student_id = $2
      LIMIT 1`,
@@ -346,6 +349,7 @@ async function validateGroupPayment(
      JOIN public.users u
        ON u.id = e.student_id
        AND u.role = 'student'
+     AND u.account_status = 'active'
      WHERE e.id = $1
        AND e.student_id = $2
      LIMIT 1`,
