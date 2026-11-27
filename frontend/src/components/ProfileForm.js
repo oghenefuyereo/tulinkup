@@ -80,7 +80,13 @@ function calculateRevenue(hourlyRateCents) {
 }
 
 // Create a form for students and tutors to update their profiles.
-export function ProfileForm({ user, profile, subjects = [] }) {
+export function ProfileForm({
+  user,
+  profile,
+  subjects = [],
+  accountOnly = false,
+  returnToProfile = false,
+}) {
   // Initialize the router for refreshing profile information.
   const router = useRouter();
 
@@ -91,7 +97,8 @@ export function ProfileForm({ user, profile, subjects = [] }) {
     error: "",
   });
 
-  const isTutor = user.role === "tutor";
+  const isTutor = user.role === "tutor" && !accountOnly;
+  const professionalOnly = isTutor && returnToProfile;
 
   // Store the tutor's current hourly rate.
   const [hourlyRate, setHourlyRate] = useState(
@@ -189,7 +196,15 @@ export function ProfileForm({ user, profile, subjects = [] }) {
       const body = new FormData(event.currentTarget);
 
       // Add the selected subjects as a JSON string.
-      body.set("subjects", JSON.stringify(selected));
+      if (accountOnly) {
+        body.set("scope", "account");
+      } else {
+        if (professionalOnly) {
+          body.set("scope", "professional");
+        }
+
+        body.set("subjects", JSON.stringify(selected));
+      }
 
       // Send the validated hourly rate in dollars.
       if (isTutor) {
@@ -209,7 +224,7 @@ export function ProfileForm({ user, profile, subjects = [] }) {
       const data = await response.json();
 
       // Display an error if the profile cannot be saved.
-      if (!response.ok) {
+      if (!response.ok || data.success !== true) {
         throw new Error(
           data.error ||
           data.message ||
@@ -225,6 +240,14 @@ export function ProfileForm({ user, profile, subjects = [] }) {
       });
 
       // Refresh the page to display the updated profile information.
+      if (returnToProfile) {
+        // Reload the authenticated profile with fresh
+        // database information after a successful save.
+        router.replace("/profile");
+        router.refresh();
+        return;
+      }
+
       router.refresh();
     } catch (error) {
       // Display an error if something goes wrong while saving.
@@ -242,6 +265,8 @@ export function ProfileForm({ user, profile, subjects = [] }) {
   // Display the profile editing form.
   return (
     <form onSubmit={submit} className="panel p-6 sm:p-8">
+      {!professionalOnly && (
+        <>
       {/* Display basic account information for all users. */}
       <div className="grid gap-5 sm:grid-cols-2">
         {/* Allow users to update their full name. */}
@@ -271,9 +296,16 @@ export function ProfileForm({ user, profile, subjects = [] }) {
         </label>
       </div>
 
+        </>
+      )}
+
       {/* Display additional profile fields for tutors only. */}
       {isTutor && (
-        <div className="mt-8 border-t border-[#edf0f5] pt-8">
+        <div className={
+          professionalOnly
+            ? ""
+            : "mt-8 border-t border-[#edf0f5] pt-8"
+        }>
           <h2 className="text-xl font-extrabold">
             Professional tutor profile
           </h2>
@@ -549,7 +581,20 @@ export function ProfileForm({ user, profile, subjects = [] }) {
       )}
 
       {/* Display the button used to save profile changes. */}
-      <div className="mt-7 flex justify-end">
+      <div className="mt-7 flex flex-wrap justify-end gap-3">
+        {returnToProfile && (
+          <button
+            type="button"
+            disabled={state.loading}
+            onClick={() => {
+              router.replace("/profile");
+              router.refresh();
+            }}
+            className="rounded-xl border border-[#dce3ee] px-6 py-3 text-sm font-bold text-[#173472] disabled:opacity-50"
+          >
+            Cancel
+          </button>
+        )}
         <button
           type="submit"
           disabled={

@@ -190,7 +190,7 @@ export function LearningFeed({
       <div
         role="group"
         aria-label="Filter learning feed"
-        className="flex flex-wrap gap-2"
+        className="flex flex-wrap gap-2 max-lg:flex-nowrap max-lg:max-w-full max-lg:overflow-x-auto max-lg:[&>button]:shrink-0 max-lg:[&>button]:whitespace-nowrap"
       >
         {filters.map((filter) => (
           <button

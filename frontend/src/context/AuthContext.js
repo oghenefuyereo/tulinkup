@@ -63,9 +63,17 @@ export function AuthProvider({ children }) {
 
   // Refresh account information when navigating.
   useEffect(() => {
-    refreshUser();
+    let cancelled = false;
+
+    // Schedule the refresh outside the synchronous effect.
+    queueMicrotask(() => {
+      if (!cancelled) {
+        void refreshUser();
+      }
+    });
 
     return () => {
+      cancelled = true;
       requestId.current += 1;
     };
   }, [pathname, refreshUser]);

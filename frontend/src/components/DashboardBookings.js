@@ -424,6 +424,15 @@ export function DashboardBookings({
           validPricing
         );
 
+        // Allow eligible participants to open the existing classroom.
+        const classroomHref =
+          ["student", "tutor"].includes(role) &&
+          booking.status === "accepted" &&
+          eligiblePayment &&
+          /^[1-9]\d*$/.test(bookingId)
+            ? `/classroom/one_on_one/${bookingId}`
+            : null;
+
         // Check whether payment or refund review is required.
         const requiresPaymentReview = [
           "paid",
@@ -651,47 +660,42 @@ export function DashboardBookings({
               {["tutor", "student"].includes(role) &&
                 booking.status === "accepted" && (
                   <p className="mt-3 text-xs text-[#64748b]">
-                    {eligiblePayment
-                      ? "Live classroom access is currently unavailable from this dashboard."
-                      : "Live session access requires valid pricing and payment verification."}
+                    {classroomHref
+                      ? "Open the classroom to check session availability."
+                      : eligiblePayment
+                        ? "Classroom access is unavailable for this booking."
+                        : "Live session access requires valid pricing and payment verification."}
                   </p>
                 )}
             </div>
 
             {/* Display actions based on role and status. */}
             <div className="flex flex-wrap gap-2">
-              {/* Allow tutors to start an accepted live session. */}
-              {role === "tutor" &&
+              {/* Open the authorized one-on-one classroom. */}
+              {["student", "tutor"].includes(role) &&
                 booking.status === "accepted" && (
-                  <button
-                    type="button"
-                    disabled
-                    title={
-                      eligiblePayment
-                        ? "Live classroom access is currently unavailable"
-                        : "Payment verification is required"
-                    }
-                    className="cursor-not-allowed rounded-xl bg-[#26469b] px-4 py-2.5 text-sm font-bold text-white opacity-50"
-                  >
-                    Start Live Session
-                  </button>
-                )}
-
-              {/* Allow students to join an accepted live session. */}
-              {role === "student" &&
-                booking.status === "accepted" && (
-                  <button
-                    type="button"
-                    disabled
-                    title={
-                      eligiblePayment
-                        ? "Live classroom access is currently unavailable"
-                        : "Payment verification is required"
-                    }
-                    className="cursor-not-allowed rounded-xl bg-[#26469b] px-4 py-2.5 text-sm font-bold text-white opacity-50"
-                  >
-                    Join Live Session
-                  </button>
+                  classroomHref ? (
+                    <Link
+                      href={classroomHref}
+                      prefetch={false}
+                      className="inline-flex items-center justify-center rounded-xl bg-[#26469b] px-4 py-2.5 text-sm font-bold text-white transition hover:bg-[#173472]"
+                    >
+                      {role === "tutor"
+                        ? "Start Live Session"
+                        : "Join Live Session"}
+                    </Link>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled
+                      title="Classroom eligibility requirements are not satisfied"
+                      className="cursor-not-allowed rounded-xl bg-[#26469b] px-4 py-2.5 text-sm font-bold text-white opacity-50"
+                    >
+                      {role === "tutor"
+                        ? "Start Live Session"
+                        : "Join Live Session"}
+                    </button>
+                  )
                 )}
 
               {/* Allow tutors to accept or decline pending bookings. */}

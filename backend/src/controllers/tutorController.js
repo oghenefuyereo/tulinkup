@@ -144,6 +144,8 @@ function makeSlug(fullName, userId) {
 
 // Get the profile information of the currently logged-in tutor.
 async function getMyTutorProfile(req, res) {
+
+  res.set("Cache-Control", "private, no-store");
   try {
     // Get the tutor's ID from their authentication details.
     const userId = req.user?.userId;
@@ -167,7 +169,10 @@ async function getMyTutorProfile(req, res) {
         title,
         location,
         qualifications,
-        profile_image_url
+        profile_image_url,
+        slug,
+        display_name,
+        availability_status
        FROM public.tutor_profiles
        WHERE user_id = $1
        LIMIT 1`,
@@ -193,9 +198,49 @@ async function getMyTutorProfile(req, res) {
       pricingConfig
     );
 
+    // Load the authenticated tutor's own upcoming
+    // available times independently of public approval.
+    let availability = null;
+
+    try {
+      const slots = await pool.query(
+        `SELECT
+          a.id,
+          a.available_date::text AS date,
+          a.start_time AS "startTime",
+          a.end_time AS "endTime"
+         FROM public.tutor_availability a
+         JOIN public.users u
+           ON u.id = a.tutor_id
+         WHERE a.tutor_id = $1
+           AND u.role = 'tutor'
+           AND u.account_status = 'active'
+           AND a.is_available = TRUE
+           AND (
+             a.available_date > CURRENT_DATE
+             OR (
+               a.available_date = CURRENT_DATE
+               AND a.end_time > LOCALTIME
+             )
+           )
+         ORDER BY a.available_date, a.start_time, a.id`,
+        [userId]
+      );
+
+      availability = slots.rows.map((slot) => ({
+        ...slot,
+        id: String(slot.id),
+      }));
+    } catch {
+      // Distinguish an unavailable schedule from
+      // a successfully loaded empty schedule.
+      console.error("Unable to load private tutor availability.");
+    }
+
     // Return the profile with formatted subjects and pricing.
     return res.json({
       success: true,
+      availability,
       profile: {
         ...row,
 

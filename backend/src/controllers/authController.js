@@ -265,6 +265,7 @@ const getMe = async (req, res) => {
          u.id,
          u.full_name,
          u.email,
+         u.phone,
          u.role,
          tp.profile_image_url
        FROM public.users u

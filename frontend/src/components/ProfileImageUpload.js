@@ -21,6 +21,7 @@ export function ProfileImageUpload({
   const { refreshUser } = useAuth();
   const inputRef = useRef(null);
   const busyRef = useRef(false);
+  const previewUrlRef = useRef(null);
 
   const [imageUrl, setImageUrl] = useState(
     profile?.profile_image_url ??
@@ -35,19 +36,25 @@ export function ProfileImageUpload({
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
-  // Release temporary preview URLs when no longer needed.
+  // Release the temporary preview when unmounting.
   useEffect(() => {
-    if (!file) {
-      setPreview(null);
-      return;
+    return () => {
+      if (previewUrlRef.current) {
+        URL.revokeObjectURL(previewUrlRef.current);
+        previewUrlRef.current = null;
+      }
+    };
+  }, []);
+
+  // Release the previous preview before replacing it.
+  function releasePreview() {
+    if (previewUrlRef.current) {
+      URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = null;
     }
 
-    const url = URL.createObjectURL(file);
-
-    setPreview(url);
-
-    return () => URL.revokeObjectURL(url);
-  }, [file]);
+    setPreview(null);
+  }
 
   const initials = (fullName || "Tutor")
     .trim()
@@ -58,7 +65,7 @@ export function ProfileImageUpload({
 
   function clearSelection() {
     setFile(null);
-    setPreview(null);
+    releasePreview();
 
     if (inputRef.current) {
       inputRef.current.value = "";
@@ -71,7 +78,7 @@ export function ProfileImageUpload({
     setMessage("");
     setError("");
     setFile(null);
-    setPreview(null);
+    releasePreview();
 
     if (!selected) return;
 
@@ -93,7 +100,12 @@ export function ProfileImageUpload({
       return;
     }
 
+    // Create the preview after validating the image.
+    const url = URL.createObjectURL(selected);
+
+    previewUrlRef.current = url;
     setFile(selected);
+    setPreview(url);
   }
 
   async function updateImage(method) {
@@ -181,7 +193,7 @@ export function ProfileImageUpload({
             <img
               src={displayedImage}
               alt={preview ? "Selected image preview" : "Tutor profile picture"}
-              className="h-full w-full object-cover"
+              className="h-full w-full object-cover object-[center_20%]"
             />
           ) : (
             <span className="text-3xl font-extrabold text-[#26469b]">

@@ -51,6 +51,79 @@ async function updateProfile(req, res) {
     });
   }
 
+  // Account-only requests must not modify tutor
+  // professional information.
+  const accountOnly = req.body?.scope === "account";
+
+  const professionalOnly =
+    req.body?.scope === "professional";
+
+  if (
+    Object.hasOwn(req.body || {}, "scope") &&
+    !accountOnly &&
+    !professionalOnly
+  ) {
+    return res.status(400).json({
+      error: "Invalid update scope.",
+    });
+  }
+
+  if (accountOnly) {
+    if (role !== "tutor") {
+      return res.status(403).json({
+        error: "Access denied.",
+      });
+    }
+
+    const allowed = new Set([
+      "scope", "fullName", "phone",
+    ]);
+
+    if (
+      !Object.hasOwn(req.body, "fullName") ||
+      !Object.hasOwn(req.body, "phone") ||
+      Object.keys(req.body).some(
+        (key) => !allowed.has(key)
+      )
+    ) {
+      return res.status(400).json({
+        error: "Invalid account information.",
+      });
+    }
+  }
+
+  if (professionalOnly) {
+    if (role !== "tutor") {
+      return res.status(403).json({
+        error: "Access denied.",
+      });
+    }
+
+    const allowed = new Set([
+      "scope",
+      "title",
+      "location",
+      "biography",
+      "qualifications",
+      "experience",
+      "hourlyRate",
+      "subjects",
+    ]);
+
+    if (
+      Object.keys(req.body).some(
+        (key) => !allowed.has(key)
+      ) ||
+      [...allowed].some(
+        (key) => !Object.hasOwn(req.body, key)
+      )
+    ) {
+      return res.status(400).json({
+        error: "Invalid professional information.",
+      });
+    }
+  }
+
   // Get the profile information submitted by the user.
   const {
     fullName,
@@ -66,11 +139,14 @@ async function updateProfile(req, res) {
 
   // Make sure the user's name and phone number meet the requirements.
   if (
-    typeof fullName !== "string" ||
-    fullName.trim().length < 2 ||
-    fullName.trim().length > 100 ||
-    typeof phone !== "string" ||
-    phone.length > 30
+    !professionalOnly &&
+    (
+      typeof fullName !== "string" ||
+      fullName.trim().length < 2 ||
+      fullName.trim().length > 100 ||
+      typeof phone !== "string" ||
+      phone.length > 30
+    )
   ) {
     return res.status(400).json({
       error: "Enter valid personal information.",
@@ -82,7 +158,7 @@ async function updateProfile(req, res) {
   let hourlyRateCents = null;
 
   // Tutors need to provide additional information about their services.
-  if (role === "tutor") {
+  if (role === "tutor" && !accountOnly) {
     // Check that all required tutor details are complete and valid.
     if (
       typeof title !== "string" ||
@@ -144,7 +220,7 @@ async function updateProfile(req, res) {
     await client.query("BEGIN");
 
     // Retrieve the current pricing rules and validate the tutor's hourly rate.
-    if (role === "tutor") {
+    if (role === "tutor" && !accountOnly) {
       const pricing = await getPricingConfig(client);
 
       try {
@@ -162,10 +238,21 @@ async function updateProfile(req, res) {
     }
 
     // Update the user's name and phone number in the users table.
-    const updatedUser = await client.query(
+    const updatedUser = professionalOnly
+      ? await client.query(
+          `SELECT id, full_name, email, phone, role
+           FROM public.users
+           WHERE id = $1
+             AND role = 'tutor'
+             AND account_status = 'active'
+           FOR UPDATE`,
+          [userId]
+        )
+      : await client.query(
       `UPDATE public.users
        SET full_name = $1, phone = $2
        WHERE id = $3 AND role = $4
+         AND account_status = 'active'
        RETURNING id, full_name, email, phone, role`,
       [fullName.trim(), phone.trim(), userId, role]
     );
@@ -180,7 +267,7 @@ async function updateProfile(req, res) {
     }
 
     // Save the tutor's professional information if the user is a tutor.
-    if (role === "tutor") {
+    if (role === "tutor" && !accountOnly) {
       await client.query(
         `INSERT INTO public.tutor_profiles
           (

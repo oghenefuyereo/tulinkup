@@ -1,6 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import StudentProfileAvatar from "@/components/StudentProfileAvatar";
+
+const IMAGE_ENDPOINT = "/api/profile/student/image";
+
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+
+const ALLOWED_IMAGE_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
 
 const FIELDS = [
   {
@@ -44,6 +55,8 @@ export default function StudentProfileForm({
   profile,
   fullName,
   onSaved,
+  onImageChanged,
+  imageVersion,
   onCancel,
 }) {
   const [values, setValues] = useState(() =>
@@ -57,6 +70,132 @@ export default function StudentProfileForm({
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [imageBusy, setImageBusy] = useState(false);
+  const [imageError, setImageError] = useState("");
+  const [imageNotice, setImageNotice] = useState("");
+
+  const operationLock = useRef(false);
+
+  const busy = saving || imageBusy;
+
+  function selectImage(event) {
+    const file = event.target.files?.[0];
+
+    event.target.value = "";
+
+    if (!file || operationLock.current) return;
+
+    setSelectedFile(null);
+    setImageError("");
+    setImageNotice("");
+
+    if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
+      setImageError(
+        "Only JPEG, PNG, and WebP images are supported."
+      );
+      return;
+    }
+
+    if (file.size === 0) {
+      setImageError("The selected image is empty.");
+      return;
+    }
+
+    if (file.size > MAX_IMAGE_BYTES) {
+      setImageError(
+        "Profile pictures must not exceed 4 MiB."
+      );
+      return;
+    }
+
+    setSelectedFile(file);
+  }
+
+  async function changeImage(method) {
+    if (operationLock.current) return;
+
+    if (method === "POST" && !selectedFile) return;
+
+    if (method === "DELETE") {
+      if (!profile.hasProfileImage) return;
+
+      if (!window.confirm(
+        "Remove your profile picture?"
+      )) {
+        return;
+      }
+    }
+
+    operationLock.current = true;
+
+    setImageBusy(true);
+    setImageError("");
+    setImageNotice("");
+
+    try {
+      let body;
+
+      if (method === "POST") {
+        body = new FormData();
+        body.append("image", selectedFile);
+      }
+
+      const response = await fetch(IMAGE_ENDPOINT, {
+        method,
+        credentials: "same-origin",
+        cache: "no-store",
+        ...(body ? { body } : {}),
+      });
+
+      const result = await response
+        .json()
+        .catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(
+          response.status >= 500
+            ? "Unable to confirm the picture update. Refresh your profile before retrying."
+            : result?.error || "Unable to update your picture."
+        );
+      }
+
+      if (
+        result?.success !== true ||
+        result.hasProfileImage !== (method === "POST") ||
+        typeof result.cleanupPending !== "boolean"
+      ) {
+        throw new Error(
+          "Unable to confirm the picture update. Refresh your profile before retrying."
+        );
+      }
+
+      onImageChanged(result.hasProfileImage);
+      setSelectedFile(null);
+
+      const message =
+        method === "POST"
+          ? "Profile picture saved successfully."
+          : "Profile picture removed successfully.";
+
+      setImageNotice(
+        result.cleanupPending
+          ? `${message} Previous image storage cleanup is pending.`
+          : message
+      );
+
+    } catch (error) {
+      setImageError(
+        error instanceof TypeError
+          ? "Connection interrupted. Refresh your profile to confirm the picture status."
+          : error.message || "Unable to update your picture."
+      );
+
+    } finally {
+      operationLock.current = false;
+      setImageBusy(false);
+    }
+  }
 
   function updateField(name, value) {
     setValues((previous) => ({
@@ -68,7 +207,7 @@ export default function StudentProfileForm({
   async function handleSubmit(event) {
     event.preventDefault();
 
-    if (saving) return;
+    if (operationLock.current) return;
 
     setError("");
 
@@ -100,6 +239,7 @@ export default function StudentProfileForm({
       }
     }
 
+    operationLock.current = true;
     setSaving(true);
 
     try {
@@ -139,6 +279,7 @@ export default function StudentProfileForm({
         "Unable to save your profile."
       );
     } finally {
+      operationLock.current = false;
       setSaving(false);
     }
   }
@@ -165,21 +306,123 @@ export default function StudentProfileForm({
       onSubmit={handleSubmit}
       className="panel min-w-0 space-y-6 p-5 sm:p-7"
     >
-      <div className="flex flex-wrap items-center gap-4 border-b border-[#edf0f5] pb-6">
-        <div className="grid h-20 w-20 shrink-0 place-items-center rounded-full bg-[#e8eefb] text-2xl font-extrabold text-[#26469b]">
-          {initials}
+      <section className="space-y-4 border-b border-[#edf0f5] pb-6">
+        <div className="flex flex-wrap items-center gap-4">
+          <StudentProfileAvatar
+            initials={initials}
+            hasProfileImage={profile.hasProfileImage}
+            version={imageVersion}
+            size="small"
+          />
+
+          <div className="min-w-0 flex-1 basis-48">
+            <h2 className="font-bold">
+              Profile picture
+            </h2>
+
+            <p className="mt-1 text-sm text-[#68758c]">
+              JPEG, PNG or WebP. Maximum 4 MiB.
+            </p>
+
+            <p className="mt-1 text-xs text-[#68758c]">
+              Your picture is currently private.
+            </p>
+          </div>
         </div>
 
-        <div className="min-w-0 flex-1">
-          <p className="font-bold">
-            Profile picture
-          </p>
+        <div>
+          <label
+            htmlFor="student-profile-image"
+            className="mb-2 block text-sm font-semibold"
+          >
+            {profile.hasProfileImage
+              ? "Choose a replacement picture"
+              : "Choose a profile picture"}
+          </label>
 
-          <p className="mt-1 text-sm text-[#68758c]">
-            Profile picture uploads coming soon.
-          </p>
+          <input
+            id="student-profile-image"
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            disabled={busy}
+            onChange={selectImage}
+            className="block w-full min-w-0 rounded-xl border border-[#dce3ee] p-2 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-[#edf1fa] file:px-3 file:py-2 file:font-semibold file:text-[#26469b] disabled:opacity-60"
+          />
         </div>
-      </div>
+
+        {selectedFile && (
+          <div className="rounded-xl bg-[#f7f9fd] p-3">
+            <p className="break-all text-sm font-semibold">
+              {selectedFile.name}
+            </p>
+
+            <p className="mt-1 text-xs text-[#68758c]">
+              Ready to upload
+            </p>
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-3">
+          <button
+            type="button"
+            disabled={busy || !selectedFile}
+            onClick={() => changeImage("POST")}
+            className="btn-primary px-4 py-2 text-sm disabled:opacity-50"
+          >
+            {imageBusy
+              ? "Please wait..."
+              : profile.hasProfileImage
+                ? "Replace picture"
+                : "Upload picture"}
+          </button>
+
+          {profile.hasProfileImage && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => changeImage("DELETE")}
+              className="rounded-xl border border-red-200 px-4 py-2 text-sm font-bold text-red-700 hover:bg-red-50 disabled:opacity-50"
+            >
+              Remove picture
+            </button>
+          )}
+
+          {selectedFile && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setSelectedFile(null)}
+              className="rounded-xl border border-[#dce3ee] px-4 py-2 text-sm font-semibold disabled:opacity-50"
+            >
+              Clear selection
+            </button>
+          )}
+        </div>
+
+        {imageError && (
+          <p
+            role="alert"
+            className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+          >
+            {imageError}
+          </p>
+        )}
+
+        {imageNotice && (
+          <p
+            role="status"
+            className="rounded-xl border border-green-200 bg-green-50 p-3 text-sm text-green-800"
+          >
+            {imageNotice}
+          </p>
+        )}
+
+        <p className="text-xs leading-5 text-[#68758c]">
+          Picture changes are saved immediately after
+          uploading or removing a picture. Cancel below
+          only discards unsaved text changes.
+        </p>
+      </section>
 
       <p className="text-sm leading-6 text-[#68758c]">
         All fields are optional. Your learning profile
@@ -203,7 +446,7 @@ export default function StudentProfileForm({
               value={values[field.name]}
               placeholder={field.placeholder}
               maxLength={field.max}
-              disabled={saving}
+              disabled={busy}
               onChange={(event) =>
                 updateField(
                   field.name,
@@ -220,7 +463,7 @@ export default function StudentProfileForm({
               value={values[field.name]}
               placeholder={field.placeholder}
               maxLength={field.max}
-              disabled={saving}
+              disabled={busy}
               onChange={(event) =>
                 updateField(
                   field.name,
@@ -257,7 +500,7 @@ export default function StudentProfileForm({
       <div className="flex flex-wrap gap-3 border-t border-[#edf0f5] pt-5">
         <button
           type="submit"
-          disabled={saving}
+          disabled={busy}
           className="btn-primary flex-1 basis-36 py-3 disabled:opacity-60"
         >
           {saving ? "Saving..." : "Save profile"}
@@ -265,7 +508,7 @@ export default function StudentProfileForm({
 
         <button
           type="button"
-          disabled={saving}
+          disabled={busy}
           onClick={onCancel}
           className="flex-1 basis-36 rounded-xl border border-[#dce3ee] bg-white px-4 py-3 text-sm font-bold text-[#173472] disabled:opacity-60"
         >

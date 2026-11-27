@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useId, useState } from "react";
+import { useRouter } from "next/navigation";
 import StudentProfileForm from "@/components/StudentProfileForm";
+import StudentProfileAvatar from "@/components/StudentProfileAvatar";
+import StudentAccountSettings from "@/components/StudentAccountSettings";
 import { Icon } from "@/components/Icons";
 
 const PROFILE_TABS = [
@@ -68,14 +71,28 @@ function SoonLabel() {
 
 export default function StudentProfileView({
   fullName,
+  email,
   children,
+  view = "profile",
 }) {
+  const router = useRouter();
+
   const [activeTab, setActiveTab] = useState("About");
-  const [view, setView] = useState("profile");
   const [profile, setProfile] = useState(null);
   const [loadError, setLoadError] = useState("");
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [notice, setNotice] = useState("");
+  const [imageVersion, setImageVersion] = useState(0);
+
+  function handleImageChanged(hasProfileImage) {
+    setProfile((previous) =>
+      previous
+        ? { ...previous, hasProfileImage }
+        : previous
+    );
+
+    setImageVersion((previous) => previous + 1);
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -128,8 +145,8 @@ export default function StudentProfileView({
   function handleProfileSaved(savedProfile) {
     setProfile(savedProfile);
     setActiveTab("About");
-    setView("profile");
     setNotice("Your profile has been updated.");
+    router.replace("/profile");
   }
 
   function retryProfile() {
@@ -156,6 +173,14 @@ export default function StudentProfileView({
   if (view === "edit" && profile) {
     return (
       <div className="min-w-0 space-y-5 text-[#17233d]">
+        <button
+          type="button"
+          onClick={() => router.replace("/profile")}
+          className="text-sm font-bold text-[#52617b] hover:text-[#26469b]"
+        >
+          ← Back to my profile
+        </button>
+
         <div>
           <p className="eyebrow">
             Student profile
@@ -174,45 +199,23 @@ export default function StudentProfileView({
           profile={profile}
           fullName={fullName}
           onSaved={handleProfileSaved}
-          onCancel={() => setView("profile")}
+          onImageChanged={handleImageChanged}
+          imageVersion={imageVersion}
+          onCancel={() => router.replace("/profile")}
         />
       </div>
     );
   }
 
-  // Preserve the existing private account settings.
+  // Keep private account management separate.
   if (view === "settings") {
     return (
-      <div className="min-w-0 space-y-5">
-        <button
-          type="button"
-          onClick={() => setView("profile")}
-          className="text-sm font-bold text-[#52617b]"
-        >
-          ← Back to my profile
-        </button>
-
-        <div>
-          <p className="eyebrow">
-            Account settings
-          </p>
-
-          <h1 className="mt-2 text-3xl font-extrabold tracking-tight">
-            Manage your account
-          </h1>
-
-          <p className="mt-2 text-sm leading-6 text-[#68758c]">
-            Update your name and private contact information.
-          </p>
-        </div>
-
+      <StudentAccountSettings
+        email={email}
+        onBack={() => router.replace("/profile")}
+      >
         {children}
-
-        <p className="text-xs text-[#68758c]">
-          Your phone number is private and is not displayed
-          on this profile.
-        </p>
-      </div>
+      </StudentAccountSettings>
     );
   }
 
@@ -256,12 +259,11 @@ export default function StudentProfileView({
 
         <div className="flex flex-wrap items-center gap-5">
 
-          <div
-            aria-label="Student profile avatar"
-            className="grid h-24 w-24 shrink-0 place-items-center overflow-hidden rounded-full bg-[#e8eefb] text-3xl font-extrabold text-[#26469b] sm:h-28 sm:w-28"
-          >
-            {initials}
-          </div>
+          <StudentProfileAvatar
+            initials={initials}
+            hasProfileImage={profile?.hasProfileImage === true}
+            version={imageVersion}
+          />
 
           <div className="min-w-0 flex-1 basis-48">
 
@@ -322,7 +324,7 @@ export default function StudentProfileView({
             disabled={!profile}
             onClick={() => {
               setNotice("");
-              setView("edit");
+              router.push("/profile?view=edit");
             }}
             className="btn-primary flex min-w-0 flex-1 basis-36 items-center justify-center py-3 disabled:opacity-50"
           >
@@ -331,7 +333,10 @@ export default function StudentProfileView({
 
           <button
             type="button"
-            onClick={() => setView("settings")}
+            onClick={() => {
+              setNotice("");
+              router.push("/profile?view=settings");
+            }}
             className="flex min-w-0 flex-1 basis-36 items-center justify-center gap-2 rounded-xl border border-[#dce3ee] bg-white px-4 py-3 text-sm font-bold text-[#173472] hover:bg-[#f7f9fd]"
           >
 
