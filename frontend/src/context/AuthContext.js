@@ -41,7 +41,11 @@ export function AuthProvider({ children }) {
       const data = await response.json();
 
       if (id === requestId.current) {
-        setUser(data.user ?? null);
+        setUser(
+          data.user
+            ? { ...data.user, avatarRevision: id }
+            : null
+        );
       }
     } catch {
       if (id === requestId.current) {

@@ -183,7 +183,7 @@ export default async function TutorDashboard() {
             Manage profile
           </Link>
 
-          <Link href="/availability" className="btn-secondary">
+          <Link href="/dashboard/tutor/availability" className="btn-secondary">
             Set availability
           </Link>
 

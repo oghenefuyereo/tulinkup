@@ -129,18 +129,7 @@ const tutorSelect = `
 `;
 
 // Create a unique URL slug using the tutor's name and user ID.
-function makeSlug(fullName, userId) {
-  // Convert the name to lowercase and remove special characters.
-  const base = String(fullName || "tutor")
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
-
-  // Add the user ID so tutors with similar names have different URLs.
-  return `${base || "tutor"}-${userId}`;
-}
+const { makeSlug } = require("../utils/tutorSlug");
 
 // Get the profile information of the currently logged-in tutor.
 async function getMyTutorProfile(req, res) {

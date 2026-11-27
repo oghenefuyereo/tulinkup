@@ -6,6 +6,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Icon } from "./Icons";
+import { ProfileAvatar } from "./UserAvatar";
+import MessageTutorButton from "./messaging/MessageTutorButton";
 
 // Define the payment statuses supported by the platform.
 const paymentLabels = {
@@ -394,6 +396,52 @@ export function DashboardBookings({
           booking.student ||
           "Student";
 
+        // Determine the other booking participant.
+        const participantName =
+          role === "student" ? tutorName : studentName;
+
+        const participantInitials = String(participantName)
+          .trim()
+          .split(/\s+/)
+          .filter(Boolean)
+          .slice(0, 2)
+          .map((part) => Array.from(part)[0])
+          .join("")
+          .toUpperCase();
+
+        const tutorSlug =
+          typeof booking.tutorSlug === "string"
+            ? booking.tutorSlug
+            : "";
+
+        const tutorProfileHref =
+          role === "student" &&
+          booking.tutorProfileAvailable === true &&
+          /^[a-z0-9]+(?:-[a-z0-9]+)*$/i.test(tutorSlug)
+            ? `/tutors/${encodeURIComponent(tutorSlug)}`
+            : null;
+
+        const tutorUserId = String(booking.tutorId ?? "");
+
+        const canMessageTutor =
+          role === "student" &&
+          booking.tutorProfileAvailable === true &&
+          /^[1-9]\d{0,18}$/.test(tutorUserId) &&
+          BigInt(tutorUserId) <= 9223372036854775807n;
+
+        const participantAvatar = (
+          <ProfileAvatar
+            imageUrl={
+              role === "student" &&
+              booking.tutorProfileAvailable === true
+                ? booking.tutorProfileImageUrl
+                : null
+            }
+            initials={participantInitials}
+            size={52}
+          />
+        );
+
         // Retrieve the booked subject.
         const subject =
           booking.subjectName ||
@@ -458,36 +506,53 @@ export function DashboardBookings({
         return (
           <article
             key={bookingId}
-            className="panel flex flex-col gap-5 p-5 sm:flex-row sm:items-center"
+            className="panel flex min-w-0 flex-col gap-4 p-4 sm:p-5"
           >
-            {/* Display the calendar icon. */}
-            <div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-[#edf1fa] text-[#26469b]">
-              <Icon
-                name="calendar"
-                className="h-6 w-6"
-              />
-            </div>
+            {/* Participant header. */}
+            <div className="flex min-w-0 items-start gap-3">
+              {tutorProfileHref ? (
+                <Link
+                  href={tutorProfileHref}
+                  prefetch={false}
+                  aria-label={`View ${tutorName}'s profile`}
+                  className="inline-flex shrink-0 rounded-full"
+                >
+                  {participantAvatar}
+                </Link>
+              ) : (
+                <div className="shrink-0">
+                  {participantAvatar}
+                </div>
+              )}
 
-            {/* Display booking information. */}
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                {/* Display the tutor or student name. */}
-                <h3 className="font-extrabold">
-                  {role === "student"
-                    ? tutorName
-                    : studentName}
+              <div className="min-w-0 flex-1">
+                <h3 className="break-words text-base font-extrabold">
+                  {tutorProfileHref ? (
+                    <Link
+                      href={tutorProfileHref}
+                      prefetch={false}
+                      className="text-[#26469b] hover:underline"
+                    >
+                      {participantName}
+                    </Link>
+                  ) : (
+                    participantName
+                  )}
                 </h3>
 
-                {/* Display the current booking status. */}
-                <Status value={booking.status} />
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <Status value={booking.status} />
 
-                {/* Display the current payment status. */}
-                <PaymentStatus
-                  value={pricing.paymentStatus}
-                  valid={validPricing}
-                />
+                  <PaymentStatus
+                    value={pricing.paymentStatus}
+                    valid={validPricing}
+                  />
+                </div>
               </div>
+            </div>
 
+            {/* Booking details. */}
+            <div className="min-w-0">
               {/* Display the booked subject. */}
               <p className="mt-1 text-sm font-semibold text-[#58657d]">
                 {subject}
@@ -656,21 +721,41 @@ export function DashboardBookings({
                 </p>
               )}
 
-              {/* Display the live classroom integration notice. */}
-              {["tutor", "student"].includes(role) &&
-                booking.status === "accepted" && (
-                  <p className="mt-3 text-xs text-[#64748b]">
-                    {classroomHref
-                      ? "Open the classroom to check session availability."
-                      : eligiblePayment
-                        ? "Classroom access is unavailable for this booking."
-                        : "Live session access requires valid pricing and payment verification."}
-                  </p>
-                )}
+              {/* Student-to-tutor profile and messaging actions. */}
+              {(tutorProfileHref || canMessageTutor) && (
+                <div
+                  className={`mt-4 grid items-start gap-2 ${
+                    tutorProfileHref && canMessageTutor
+                      ? "grid-cols-2"
+                      : "grid-cols-1"
+                  }`}
+                >
+                  {tutorProfileHref && (
+                    <Link
+                      href={tutorProfileHref}
+                      prefetch={false}
+                      className="btn-secondary flex w-full min-w-0 items-center justify-center gap-2 py-4 text-center"
+                    >
+                      <Icon
+                        name="user"
+                        className="h-5 w-5 shrink-0"
+                      />
+                      View profile
+                    </Link>
+                  )}
+
+                  {canMessageTutor && (
+                    <MessageTutorButton
+                      tutorUserId={tutorUserId}
+                      wrapperClassName="min-w-0 w-full"
+                    />
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Display actions based on role and status. */}
-            <div className="flex flex-wrap gap-2">
+            <div className="flex min-w-0 flex-col gap-2">
               {/* Open the authorized one-on-one classroom. */}
               {["student", "tutor"].includes(role) &&
                 booking.status === "accepted" && (
@@ -678,7 +763,7 @@ export function DashboardBookings({
                     <Link
                       href={classroomHref}
                       prefetch={false}
-                      className="inline-flex items-center justify-center rounded-xl bg-[#26469b] px-4 py-2.5 text-sm font-bold text-white transition hover:bg-[#173472]"
+                      className="inline-flex w-full items-center justify-center rounded-xl bg-[#26469b] px-4 py-4 text-sm font-bold text-white transition hover:bg-[#173472]"
                     >
                       {role === "tutor"
                         ? "Start Live Session"
@@ -689,13 +774,25 @@ export function DashboardBookings({
                       type="button"
                       disabled
                       title="Classroom eligibility requirements are not satisfied"
-                      className="cursor-not-allowed rounded-xl bg-[#26469b] px-4 py-2.5 text-sm font-bold text-white opacity-50"
+                      className="w-full cursor-not-allowed rounded-xl bg-[#26469b] px-4 py-4 text-sm font-bold text-white opacity-50"
                     >
                       {role === "tutor"
                         ? "Start Live Session"
                         : "Join Live Session"}
                     </button>
                   )
+                )}
+
+              {/* Display the live classroom integration notice. */}
+              {["tutor", "student"].includes(role) &&
+                booking.status === "accepted" && (
+                  <p className="text-center text-xs leading-5 text-[#64748b]">
+                    {classroomHref
+                      ? "Open the classroom to check session availability."
+                      : eligiblePayment
+                        ? "Classroom access is unavailable for this booking."
+                        : "Live session access requires valid pricing and payment verification."}
+                  </p>
                 )}
 
               {/* Allow tutors to accept or decline pending bookings. */}
@@ -790,24 +887,15 @@ export function DashboardBookings({
                     onClick={() =>
                       update(bookingId, "cancelled")
                     }
-                    className="btn-secondary px-4 py-2.5 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="w-full rounded-xl px-4 py-3 text-sm font-semibold text-[#64748b] hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {busy === `${bookingId}-cancelled`
                       ? "Cancelling..."
-                      : "Cancel"}
+                      : "Cancel booking"}
                   </button>
                 )}
 
-              {/* Allow students to view the tutor's profile. */}
-              {role === "student" &&
-                booking.tutorSlug && (
-                  <Link
-                    href={`/tutors/${booking.tutorSlug}`}
-                    className="btn-secondary px-4 py-2.5"
-                  >
-                    View tutor
-                  </Link>
-                )}
+
             </div>
           </article>
         );

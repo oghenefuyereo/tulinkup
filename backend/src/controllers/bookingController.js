@@ -166,6 +166,8 @@ function formatBooking(row) {
   };
 }
 
+const { makeSlug } = require("../utils/tutorSlug");
+
 // Get the bookings that belong to the logged-in student or tutor.
 async function getBookings(req, res) {
   try {
@@ -190,10 +192,17 @@ async function getBookings(req, res) {
       `SELECT
          b.*,
          s.full_name AS student_name,
-         t.full_name AS tutor_name
+         t.full_name AS tutor_name,
+         tp.profile_image_url AS tutor_profile_image_url,
+         (tp.id IS NOT NULL) AS tutor_profile_available
        FROM public.bookings b
        JOIN public.users s ON s.id = b.student_id
        JOIN public.users t ON t.id = b.tutor_id
+       LEFT JOIN public.tutor_profiles tp
+         ON tp.user_id = b.tutor_id
+         AND t.role = 'tutor'
+         AND t.account_status = 'active'
+         AND tp.approval_status = 'approved'
        WHERE ${column} = $1
        ORDER BY b.booking_date DESC, b.booking_time DESC`,
       [userId]
@@ -202,7 +211,17 @@ async function getBookings(req, res) {
     // Send the bookings back in a consistent format.
     return res.json({
       success: true,
-      bookings: result.rows.map(formatBooking),
+      bookings: result.rows.map((row) => ({
+        ...formatBooking(row),
+        tutorSlug:
+          row.tutor_profile_available === true
+            ? makeSlug(row.tutor_name, row.tutor_id)
+            : null,
+        tutorProfileImageUrl:
+          row.tutor_profile_image_url ?? null,
+        tutorProfileAvailable:
+          row.tutor_profile_available === true,
+      })),
     });
   } catch (error) {
     // Log any errors that happen while loading bookings.

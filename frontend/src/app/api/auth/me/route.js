@@ -2,6 +2,16 @@
 // Import NextResponse to send responses from the Next.js API.
 import { NextResponse } from "next/server";
 
+function authJson(body, options = {}) {
+  return NextResponse.json(body, {
+    ...options,
+    headers: {
+      "Cache-Control": "private, no-store",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
+}
+
 // Import cookies to access the user's stored authentication token.
 import { cookies } from "next/headers";
 
@@ -16,7 +26,7 @@ export async function GET() {
 
     // Return a null user if no authentication token is found.
     if (!token) {
-      return NextResponse.json({ user: null });
+      return authJson({ user: null });
     }
 
     // Send the token to the Express backend to verify the user's login.
@@ -33,7 +43,7 @@ export async function GET() {
 
     // Return an error if the backend cannot verify the user.
     if (!response.ok) {
-      return NextResponse.json(
+      return authJson(
         { user: null },
         { status: response.status === 401 ? 401 : 502 }
       );
@@ -45,15 +55,18 @@ export async function GET() {
 
     // Return a null user if the backend does not provide user details.
     if (!user) {
-      return NextResponse.json({ user: null });
+      return authJson({ user: null });
     }
 
     // Send the verified user's ID, name, and role to the frontend.
-    return NextResponse.json({
+    return authJson({
       user: {
         id: user.id,
         fullName: user.full_name,
         role: user.role,
+        hasProfileImage:
+          user.role === "student" &&
+          user.has_profile_image === true,
         profileImageUrl:
           user.role === "tutor"
             ? user.profile_image_url ?? null
@@ -65,7 +78,7 @@ export async function GET() {
     console.error("TuLinkUp authentication error:", error);
 
     // Return an error if the authentication check cannot be completed.
-    return NextResponse.json(
+    return authJson(
       { error: "Unable to verify authentication." },
       { status: 500 }
     );

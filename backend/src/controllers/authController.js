@@ -267,11 +267,18 @@ const getMe = async (req, res) => {
          u.email,
          u.phone,
          u.role,
-         tp.profile_image_url
+         tp.profile_image_url,
+         (
+           u.role = 'student'
+           AND sp.profile_image_path IS NOT NULL
+         ) AS has_profile_image
        FROM public.users u
        LEFT JOIN public.tutor_profiles tp
          ON tp.user_id = u.id
          AND u.role = 'tutor'
+       LEFT JOIN public.student_profiles sp
+         ON sp.user_id = u.id
+         AND u.role = 'student'
        WHERE u.id = $1`,
       [req.user.userId]
     );

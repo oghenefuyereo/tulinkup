@@ -87,8 +87,24 @@ async function proxyMessaging(request, context) {
         process.env.APP_ORIGIN || request.url
       ).origin;
 
+      // Allow an explicitly configured development tunnel.
+      const developmentOrigin =
+        process.env.NODE_ENV === "development"
+          ? process.env.MESSAGING_DEV_ORIGIN?.trim()
+          : null;
+
+      const trustedOrigin =
+        Boolean(origin) &&
+        (
+          origin === expectedOrigin ||
+          (
+            Boolean(developmentOrigin) &&
+            origin === developmentOrigin
+          )
+        );
+
       if (
-        origin !== expectedOrigin ||
+        !trustedOrigin ||
         (fetchSite && fetchSite !== "same-origin")
       ) {
         return jsonResponse(

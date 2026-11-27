@@ -1,5 +1,7 @@
 "use client";
 
+import { useAuth } from "@/context/AuthContext";
+
 import { useEffect, useId, useState } from "react";
 import { useRouter } from "next/navigation";
 import StudentProfileForm from "@/components/StudentProfileForm";
@@ -76,6 +78,7 @@ export default function StudentProfileView({
   view = "profile",
 }) {
   const router = useRouter();
+  const { refreshUser } = useAuth();
 
   const [activeTab, setActiveTab] = useState("About");
   const [profile, setProfile] = useState(null);
@@ -92,6 +95,9 @@ export default function StudentProfileView({
     );
 
     setImageVersion((previous) => previous + 1);
+
+    // Refresh the student's avatar throughout TuLinkUp.
+    void refreshUser();
   }
 
   useEffect(() => {

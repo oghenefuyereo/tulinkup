@@ -74,7 +74,7 @@ export function DashboardShell({
           [
             "calendar",
             "Availability",
-            "/availability",
+            "/dashboard/tutor/availability",
           ],
 
           // Create and manage group live classes.
