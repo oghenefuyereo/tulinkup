@@ -1,3 +1,4 @@
+import StudentProfileView from "@/components/StudentProfileView";
 
 // Import cookies to access the user's authentication token.
 import { cookies } from "next/headers";
@@ -94,6 +95,22 @@ export default async function ProfilePage() {
     ...user,
     fullName,
   };
+
+
+  // Display the redesigned profile for student accounts only.
+  if (user.role === "student") {
+    return (
+      <DashboardShell role={user.role} name={fullName}>
+        <StudentProfileView fullName={fullName}>
+          <ProfileForm
+            user={normalizedUser}
+            profile={profile}
+            subjects={subjects}
+          />
+        </StudentProfileView>
+      </DashboardShell>
+    );
+  }
 
   // Display the profile page inside the appropriate dashboard layout.
   return (

@@ -3,11 +3,26 @@
 "use client";
 
 // Import React hooks and Next.js navigation.
-import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { TutorCard } from "@/components/TutorCard";
 
 // Create the tutor marketplace page.
 export default function TutorsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div role="status" className="panel p-8 text-center">
+          Loading tutors...
+        </div>
+      }
+    >
+      <TutorMarketplace />
+    </Suspense>
+  );
+}
+
+function TutorMarketplace() {
   // Store tutor information.
   const [tutors, setTutors] = useState([]);
 
@@ -16,15 +31,15 @@ export default function TutorsPage() {
   const [error, setError] = useState("");
 
   // Manage search and filter values.
-  const [search, setSearch] = useState("");
+  const params = useSearchParams();
+  const [searchOverride, setSearch] = useState(null);
 
-  // Read search text submitted from the homepage.
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const query = params.get("q") || params.get("subject") || "";
+  // Read the initial search directly from URL parameters.
+  const initialSearch = (
+    params.get("q") || params.get("subject") || ""
+  ).trim().slice(0, 200);
 
-    setSearch(query.trim().slice(0, 200));
-  }, []);
+  const search = searchOverride ?? initialSearch;
   const [subject, setSubject] = useState("all");
   const [price, setPrice] = useState("all");
   const [rating, setRating] = useState("all");
@@ -401,150 +416,11 @@ export default function TutorsPage() {
               <div className="grid grid-cols-1 gap-5 @min-[560px]/platform:grid-cols-2 @min-[1000px]/platform:grid-cols-3">
 
                 {filteredTutors.map((tutor) => (
-                  <article
+                  <TutorCard
                     key={tutor.id}
-                    className="flex flex-col overflow-hidden rounded-2xl border border-[#e5e9f0] bg-white shadow-sm transition-shadow hover:shadow-lg"
-                  >
-
-                    {/* Tutor profile image */}
-                    <div className="relative aspect-square overflow-hidden bg-[#e9eef8]">
-
-                      {tutor.image?.url ? (
-                        <img
-                          src={tutor.image.url}
-                          alt={
-                            tutor.image.alt ||
-                            tutor.name
-                          }
-                          loading="lazy"
-                          className="h-full w-full object-cover object-top"
-                        />
-                      ) : (
-                        <div className="flex h-full items-center justify-center bg-[#e9eef8]">
-                          <span className="flex h-24 w-24 items-center justify-center rounded-full bg-[#26469b] text-3xl font-bold text-white">
-                            {String(tutor.name || "Tutor")
-                              .split(" ")
-                              .filter(Boolean)
-                              .slice(0, 2)
-                              .map((name) => name[0])
-                              .join("")
-                              .toUpperCase()}
-                          </span>
-                        </div>
-                      )}
-
-                      {/* Availability label */}
-                      <span
-                        className={`absolute right-4 top-4 rounded-full px-3 py-1.5 text-xs font-bold ${
-                          tutor.availabilityStatus ===
-                          "available"
-                            ? "bg-green-100 text-green-700"
-                            : "bg-white text-[#26469b]"
-                        }`}
-                      >
-                        {tutor.availabilityStatus ===
-                        "available"
-                          ? "Available now"
-                          : "By appointment"}
-                      </span>
-                    </div>
-
-                    <div className="flex flex-1 flex-col p-6">
-
-                      {/* Tutor name */}
-                      <div className="flex items-center gap-2">
-                        <h2 className="text-xl font-extrabold">
-                          {tutor.name}
-                        </h2>
-
-                        {tutor.verified && (
-                          <span
-                            title="Verified tutor"
-                            className="flex h-5 w-5 items-center justify-center rounded-full bg-[#26469b] text-xs text-white"
-                          >
-                            ✓
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Professional title */}
-                      <p className="mt-1 text-sm font-medium text-[#68758c]">
-                        {tutor.title ||
-                          "TuLinkUp Tutor"}
-                      </p>
-
-                      {/* Teaching subjects */}
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        {(tutor.subjects || []).map(
-                          (item) => (
-                            <span
-                              key={item.id}
-                              className="rounded-full bg-[#eef2fc] px-3 py-1 text-xs font-semibold text-[#26469b]"
-                            >
-                              {item.name}
-                            </span>
-                          )
-                        )}
-                      </div>
-
-                      {/* Tutor biography */}
-                      <p className="mt-4 line-clamp-3 text-sm leading-relaxed text-[#68758c]">
-                        {tutor.biography ||
-                          "Learn more about this tutor by visiting their profile."}
-                      </p>
-
-                      {/* Rating and hourly rate */}
-                      <div className="mt-auto pt-6">
-                        <div className="flex items-center justify-between border-t border-[#e5e9f0] pt-4">
-
-                          <div className="flex items-center gap-1 text-sm">
-                            {tutor.rating !== null &&
-                            tutor.rating !== undefined ? (
-                              <>
-                                <span className="text-amber-500">
-                                  ★
-                                </span>
-
-                                <span className="font-bold">
-                                  {Number(
-                                    tutor.rating
-                                  ).toFixed(1)}
-                                </span>
-
-                                <span className="text-[#68758c]">
-                                  ({tutor.reviewCount || 0})
-                                </span>
-                              </>
-                            ) : (
-                              <span className="text-[#68758c]">
-                                No reviews yet
-                              </span>
-                            )}
-                          </div>
-
-                          <div>
-                            <span className="text-xl font-extrabold">
-                              ${tutor.hourlyRate}
-                            </span>
-
-                            <span className="text-sm text-[#68758c]">
-                              {" "}/hr
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* View profile button */}
-                        <Link
-                          href={`/tutors/${encodeURIComponent(
-                            tutor.slug
-                          )}`}
-                          className="mt-5 block rounded-xl bg-[#26469b] px-5 py-3 text-center font-bold text-white transition-colors hover:bg-[#173472]"
-                        >
-                          View profile
-                        </Link>
-                      </div>
-                    </div>
-                  </article>
+                    tutor={tutor}
+                    showQuickActions
+                  />
                 ))}
               </div>
             ) : (

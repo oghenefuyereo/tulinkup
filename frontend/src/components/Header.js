@@ -58,7 +58,7 @@ export function Header() {
     { href: "/jobs", label: "Jobs" },
 
     // Learn how TuLinkUp works.
-    { href: "/#how-it-works", label: "How it works" },
+    { href: "/about", label: "How it works" },
 
 
   ];

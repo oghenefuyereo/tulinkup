@@ -94,4 +94,44 @@ router.delete(
   removeProfileImage
 );
 
+// Manage private student profile pictures.
+const {
+  getStudentProfileImage,
+  uploadStudentProfileImage,
+  removeStudentProfileImage,
+} = require("../controllers/studentMediaController");
+
+function requireStudent(req, res, next) {
+  if (!req.user?.userId || req.user.role !== "student") {
+    return res.status(403).json({
+      success: false,
+      error: "Student access required.",
+    });
+  }
+
+  next();
+}
+
+router.get(
+  "/student-profile-image",
+  protect,
+  requireStudent,
+  getStudentProfileImage
+);
+
+router.post(
+  "/student-profile-image",
+  protect,
+  requireStudent,
+  parseProfileImage,
+  uploadStudentProfileImage
+);
+
+router.delete(
+  "/student-profile-image",
+  protect,
+  requireStudent,
+  removeStudentProfileImage
+);
+
 module.exports = router;

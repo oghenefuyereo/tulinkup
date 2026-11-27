@@ -14,5 +14,15 @@ const router = express.Router();
 // Protected route to allow logged-in users to update their profiles.
 router.put("/", protect, updateProfile);
 
+ // Manage authenticated student learning profiles.
+const {
+  getStudentProfile,
+  updateStudentProfile,
+} = require("../controllers/studentProfileController");
+
+router.get("/student", protect, getStudentProfile);
+router.put("/student", protect, updateStudentProfile);
+
+
 // Export the router so it can be used in the main server.
 module.exports = router;

@@ -45,11 +45,11 @@ export function Footer() {
 
           <div className="mt-4 flex flex-col gap-3 text-sm text-blue-100/75">
             {/* Explain how the tutoring platform works. */}
-            <Link href="/#how-it-works">How it works</Link>
+            <Link href="/about">How it works</Link>
 
 
             {/* Link to the homepage for information about TuLinkUp. */}
-            <Link href="/">About TuLinkUp</Link>
+            <Link href="/about">About TuLinkUp</Link>
           </div>
         </div>
 

@@ -362,7 +362,7 @@ export function FeedRightSidebar({
           aria-label="Footer links"
           className="flex flex-wrap gap-x-3 gap-y-1"
         >
-          <Link href="/#how-it-works" className="hover:underline">
+          <Link href="/about" className="hover:underline">
             About
           </Link>
 

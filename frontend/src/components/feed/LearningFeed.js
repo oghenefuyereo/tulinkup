@@ -39,6 +39,21 @@ const communityFeatures = [
     description: "Discover and share helpful study materials.",
     icon: "bookmark",
   },
+  {
+    title: "Followers and following",
+    description: "Follow tutors and students and stay connected with their learning journeys.",
+    icon: "user",
+  },
+  {
+    title: "Community discussions",
+    description: "Exchange ideas and participate in educational discussions.",
+    icon: "message",
+  },
+  {
+    title: "Learning collaboration",
+    description: "Connect with other learners and collaborate on educational activities.",
+    icon: "dashboard",
+  },
 ];
 
 function SectionHeading({ title, href, linkLabel, icon }) {
@@ -257,6 +272,7 @@ export function LearningFeed({
                 <TutorCard
                   key={tutor.id ?? tutor.slug}
                   tutor={tutor}
+                  showQuickActions
                 />
               ))}
             </div>

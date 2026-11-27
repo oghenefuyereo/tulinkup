@@ -31,7 +31,7 @@ export default async function PlatformLayout({ children }) {
                   aria-label="Footer links"
                   className="flex flex-wrap gap-4"
                 >
-                  <Link href="/#how-it-works">
+                  <Link href="/about">
                     About
                   </Link>
 

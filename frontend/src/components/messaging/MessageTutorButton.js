@@ -8,6 +8,7 @@ import { createConversation } from "@/lib/messagingApi";
 
 export default function MessageTutorButton({
   tutorUserId,
+  wrapperClassName = "mt-3",
 }) {
   const router = useRouter();
   const { user, loading } = useAuth();
@@ -68,7 +69,7 @@ export default function MessageTutorButton({
   }
 
   return (
-    <div className="mt-3">
+    <div className={wrapperClassName}>
       <button
         type="button"
         onClick={handleMessage}

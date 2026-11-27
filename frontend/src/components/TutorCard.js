@@ -6,6 +6,7 @@ import Link from "next/link";
 
 // Import the reusable icons used in the tutor card.
 import { Icon } from "./Icons";
+import MessageTutorButton from "./messaging/MessageTutorButton";
 
 // Define the maximum hourly teaching rate in cents.
 const MAX_HOURLY_RATE_CENTS = 2500;
@@ -50,7 +51,10 @@ function formatCurrency(cents) {
 }
 
 // Create a reusable card to display a tutor's information.
-export function TutorCard({ tutor }) {
+export function TutorCard({
+  tutor,
+  showQuickActions = false,
+}) {
   // Get the tutor's name or use a default value.
   const name = tutor.name || tutor.full_name || "Tutor";
 
@@ -105,6 +109,18 @@ export function TutorCard({ tutor }) {
 
   // Check whether the tutor is currently marked as available.
   const available = tutor.availabilityStatus === "available";
+
+  // Use the actual tutor user ID for private messaging.
+  const tutorUserId =
+    typeof tutor.userId === "string"
+      ? tutor.userId
+      : Number.isSafeInteger(tutor.userId)
+        ? String(tutor.userId)
+        : "";
+
+  const hasValidTutorUserId =
+    /^[1-9]\d{0,18}$/.test(tutorUserId) &&
+    BigInt(tutorUserId) <= 9223372036854775807n;
 
   // Display the tutor's profile information inside a card.
   return (
@@ -278,6 +294,29 @@ export function TutorCard({ tutor }) {
           <p className="mt-3 rounded-lg bg-[#fff7dc] p-2.5 text-xs font-medium text-[#9f7500]">
             This tutor has not configured a valid hourly rate.
           </p>
+        )}
+
+        {/* Quick actions for Learning Feed tutor recommendations. */}
+        {showQuickActions && (
+          <div className="mt-5 flex flex-wrap items-start gap-2">
+            {isFree && (
+              <Link
+                href={`/tutors/${encodeURIComponent(tutor.slug)}/book`}
+                className="btn-primary flex min-w-0 flex-1 basis-36 items-center justify-center py-4 text-center"
+                aria-label="LinkUp — book a tutoring session"
+                title="Book a tutoring session"
+              >
+                LinkUp
+              </Link>
+            )}
+
+            {hasValidTutorUserId && (
+              <MessageTutorButton
+                tutorUserId={tutorUserId}
+                wrapperClassName="min-w-0 flex-1 basis-36"
+              />
+            )}
+          </div>
         )}
 
         {/* Link to the tutor's full profile page. */}

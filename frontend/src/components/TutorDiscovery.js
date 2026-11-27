@@ -476,6 +476,7 @@ export function TutorDiscovery({ tutors = [] }) {
             <TutorCard
               key={tutor.id}
               tutor={tutor}
+              showQuickActions
             />
           ))}
         </div>

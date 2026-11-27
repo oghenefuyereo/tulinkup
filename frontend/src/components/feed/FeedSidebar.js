@@ -30,11 +30,18 @@ const navigation = [
     label: "Courses",
     href: "/courses",
     icon: "courses",
+    comingSoon: true,
+  },
+  {
+    label: "Community",
+    icon: "user",
+    comingSoon: true,
   },
   {
     label: "Jobs",
     href: "/jobs",
     icon: "briefcase",
+    comingSoon: true,
   },
   {
     label: "Messages",
